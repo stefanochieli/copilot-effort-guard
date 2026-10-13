@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "hooks": {
+    "userPromptSubmitted": [
+      { "type": "command", "bash": "node src/effort-guard.mjs prompt", "powershell": "node src/effort-guard.mjs prompt", "timeoutSec": 10 }
+    ],
+    "postToolUse": [
+      { "type": "command", "bash": "node src/effort-guard.mjs tool", "powershell": "node src/effort-guard.mjs tool", "timeoutSec": 10 }
+    ],
+    "postToolUseFailure": [
+      { "type": "command", "bash": "node src/effort-guard.mjs failure", "powershell": "node src/effort-guard.mjs failure", "timeoutSec": 10 }
+    ]
+  }
+}
