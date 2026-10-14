@@ -11,11 +11,13 @@ Hook per **GitHub Copilot** (Copilot CLI e agent hooks di VS Code) che osserva i
 
 ## Uso
 
-Copia `src/` e `.github/hooks/effort-guard.json` nel repository dove usi Copilot (Node >= 20 richiesto).
+Provarlo e installarlo: vedi [TESTING.md](TESTING.md). In breve: `node scripts/install.mjs --user` (personale, CLI) oppure `node scripts/install.mjs <repo>` (team).
+
+Comandi: `summary`, `doctor` (stato e configurazione), `selftest` (verifica locale senza Copilot). Opzioni via ambiente: `EFFORT_GUARD_THRESHOLD`, `EFFORT_GUARD_DIR`, `EFFORT_GUARD_DEBUG=1` (salva i payload grezzi).
 
 ## Limiti
 
-Niente banda sopra il prompt, toast o slash command (Copilot non li offre) e gli hook non espongono token/contesto. I nomi dei campi del payload e l'uso di `additionalContext` non sono verificati su una sessione Copilot reale: prima dell'uso va provato. `postToolUseFailure` potrebbe non esistere in tutte le versioni; in tal caso conta `resultType`.
+Niente banda sopra il prompt, toast o slash command (Copilot non li offre) e gli hook non espongono token/contesto. Supporta sia gli eventi della CLI (`userPromptSubmitted`, `postToolUse`, `errorOccurred`) sia quelli di VS Code (`UserPromptSubmit`, `PostToolUse`, riconosciuti da `hook_event_name`). I nomi dei campi sono stati ricavati dalla documentazione e non ancora verificati su una sessione reale: usa il dump dei payload per controllarli.
 
 ## Sviluppo
 
