@@ -10,7 +10,7 @@ Gli hook di Copilot sono ancora in evoluzione e i nomi dei campi cambiano tra CL
 
 ## 2. Installazione
 
-Solo per te (CLI): `node scripts/install.mjs --user` (scrive in `~/.copilot/`).
+Solo per te: `node scripts/install.mjs --user` (scrive in `~/.copilot/`, vedi [docs/SETUP.md](docs/SETUP.md)).
 Per un repository (condiviso col team via git): `node scripts/install.mjs <cartella-repo>`, poi commit di `.effort-guard-hooks/` e `.github/hooks/effort-guard.json`.
 
 ## 3. Verifica con il dump dei payload

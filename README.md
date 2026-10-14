@@ -11,7 +11,7 @@ Hook per **GitHub Copilot** (Copilot CLI e agent hooks di VS Code) che osserva i
 
 ## Uso
 
-Provarlo e installarlo: vedi [TESTING.md](TESTING.md). In breve: `node scripts/install.mjs --user` (personale, CLI) oppure `node scripts/install.mjs <repo>` (team).
+Documentazione: [setup](docs/SETUP.md), [funzionamento](docs/FUNZIONAMENTO.md), [prove sul tuo Copilot](TESTING.md). In breve: `node scripts/install.mjs --user` (globale, CLI e VS Code) oppure `node scripts/install.mjs <repo>` (team).
 
 Comandi: `summary`, `doctor` (stato e configurazione), `selftest` (verifica locale senza Copilot). Opzioni via ambiente: `EFFORT_GUARD_THRESHOLD`, `EFFORT_GUARD_DIR`, `EFFORT_GUARD_DEBUG=1` (salva i payload grezzi).
 

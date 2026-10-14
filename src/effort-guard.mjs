@@ -13,6 +13,8 @@
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { homedir } from 'node:os'
+import { createHash } from 'node:crypto'
 import { looksLikeTestFailure } from './detect.mjs'
 
 const DEFAULT_THRESHOLD = 3
@@ -150,8 +152,16 @@ export function summary(state) {
   return `effort-guard: ${state.log.length} turns, ${struggled.length} struggling${top ? ` (most common: ${top[0]})` : ''}.`
 }
 
-function stateDir() {
-  return process.env.EFFORT_GUARD_DIR ?? join(process.cwd(), '.effort-guard')
+// Per-user install (script under ~/.copilot): keep state out of the projects,
+// one folder per working directory. Otherwise: .effort-guard/ in the project.
+export function stateDir(cwd = process.cwd(), self = fileURLToPath(import.meta.url)) {
+  if (process.env.EFFORT_GUARD_DIR) {
+    return process.env.EFFORT_GUARD_DIR
+  }
+  if (self.startsWith(join(homedir(), '.copilot'))) {
+    return join(dirname(self), 'state', createHash('sha1').update(cwd).digest('hex').slice(0, 12))
+  }
+  return join(cwd, '.effort-guard')
 }
 
 function statePath() {

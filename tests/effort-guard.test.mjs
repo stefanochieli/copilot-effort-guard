@@ -95,3 +95,14 @@ test('VS Code style payload (snake_case, hook_event_name) works end to end throu
 test('selftest passes', () => {
   assert.match(execFileSync('node', ['src/effort-guard.mjs', 'selftest'], { encoding: 'utf8' }), /^ok/)
 })
+
+import { stateDir } from '../src/effort-guard.mjs'
+import { homedir } from 'node:os'
+
+test('a per-user install keeps state outside the project, one folder per cwd', () => {
+  const self = join(homedir(), '.copilot', 'effort-guard', 'effort-guard.mjs')
+  const a = stateDir('/work/a', self)
+  assert.ok(a.startsWith(join(homedir(), '.copilot', 'effort-guard', 'state')))
+  assert.notEqual(a, stateDir('/work/b', self))
+  assert.equal(stateDir('/work/a', '/repo/src/effort-guard.mjs'), join('/work/a', '.effort-guard'))
+})
