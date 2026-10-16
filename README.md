@@ -27,4 +27,10 @@ npm test
 
 ## Rilasci
 
-Flusso: i rami di lavoro partono da `develop` e tornano su `develop` con PR; quando la situazione è stabile si alza `version` in `package.json` su `develop` e si mergia la PR `develop` → `main`. Il workflow `release.yml` crea in automatico il tag `vX.Y.Z` e la GitHub Release con le note generate (se il tag esiste già non fa nulla).
+Flusso: i rami di lavoro partono da `develop` e tornano su `develop` con PR (titolo in stile [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `chore:`…); quando la situazione è stabile si mergia la PR `develop` → `main` (merge commit, non squash).
+
+Dopo il merge su `main`, [release-please](https://github.com/googleapis/release-please) legge i commit, calcola la versione (`fix:` → patch, `feat:` → minor, `feat!:` o `BREAKING CHANGE` → major) e apre la PR "chore: release X.Y.Z", che aggiorna `package.json` e `CHANGELOG.md`. Il workflow `release-please.yml` lancia la CI su quella PR; unendola (merge) vengono creati il tag `vX.Y.Z` e la GitHub Release. Non modificare a mano `version` né `CHANGELOG.md`.
+
+Con il secret `RELEASE_PLEASE_TOKEN` (PAT o GitHub App con `contents` e `pull-requests` in scrittura) la PR di release si unisce da sola quando `checks` è verde (serve **Allow auto-merge** nelle impostazioni del repo) e il tag parte senza passaggi manuali. Senza il secret la PR di release va unita a mano. Settings → Actions → General → Workflow permissions: **Read and write** + **Allow GitHub Actions to create and approve pull requests**.
+
+Dopo il merge della PR di release, riporta `main` su `develop` (PR `main` → `develop`) per non far divergere `package.json` e il changelog.
