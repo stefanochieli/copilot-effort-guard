@@ -1,0 +1,61 @@
+# Setup
+
+## Requisiti
+
+- Node >= 20 nel PATH (`node --version`), sia per il terminale sia per VS Code.
+- Copilot CLI recente e/o VS Code con gli agent hooks (anteprima). Sul Copilot aziendale gli hook possono essere disattivati da una policy dell'organizzazione.
+
+## Installazione globale (utente) — CLI e VS Code
+
+```
+git clone https://github.com/stefanochieli/copilot-effort-guard
+cd copilot-effort-guard
+node scripts/install.mjs --user
+```
+
+Cosa fa: copia `effort-guard.mjs` e `detect.mjs` in `~/.copilot/effort-guard/` e scrive `~/.copilot/hooks/effort-guard.json`, con il percorso assoluto dello script (su Windows `%USERPROFILE%\.copilot\...`). Vale per tutti i progetti. Lo stato non finisce nei repository: sta in `~/.copilot/effort-guard/state/<cartella>`, una cartella per ogni directory di lavoro.
+
+Poi:
+
+1. **Copilot CLI**: riavvia la CLI (`copilot`). Gli hook utente di `~/.copilot/hooks/*.json` vengono letti all'avvio.
+2. **VS Code**: ricarica la finestra (*Developer: Reload Window*) e usa la chat in modalità agente. Se gli hook utente non vengono caricati, aggiungi la cartella nelle impostazioni (il nome esatto va controllato nella pagina *Agent hooks* di VS Code; di solito `chat.hookFilesLocations`) oppure usa l'installazione per repository qui sotto.
+3. Verifica: `node ~/.copilot/effort-guard/effort-guard.mjs doctor` e, in VS Code, *Developer: Show Agent Debug Logs* per vedere se l'hook è stato eseguito.
+
+Disinstallazione: `node scripts/install.mjs --user --uninstall`.
+
+## Installazione per repository (team)
+
+```
+node scripts/install.mjs /percorso/del/repo
+```
+
+Crea `.effort-guard-hooks/` e `.github/hooks/effort-guard.json` nel repository: committali e il team li riceve col normale `git pull`. Lo stato locale è in `.effort-guard/` (già da aggiungere al `.gitignore` del repo).
+
+## Configurazione
+
+Variabili d'ambiente (nel profilo della shell o nelle impostazioni dell'ambiente di VS Code):
+
+| Variabile | Default | Effetto |
+|---|---|---|
+| `EFFORT_GUARD_THRESHOLD` | `3` | Turni faticosi consecutivi prima dell'avviso |
+| `EFFORT_GUARD_DIR` | vedi sopra | Cartella dello stato |
+| `EFFORT_GUARD_DEBUG` | spento | Con `1` salva i payload grezzi in `payloads.jsonl` |
+
+## Comandi utili
+
+```
+node ~/.copilot/effort-guard/effort-guard.mjs doctor     # configurazione e riepilogo
+node ~/.copilot/effort-guard/effort-guard.mjs summary    # riepilogo dei turni
+node ~/.copilot/effort-guard/effort-guard.mjs selftest   # prova locale senza Copilot
+```
+
+## Aggiornare
+
+`git pull` nel clone e ripeti `node scripts/install.mjs --user`: sovrascrive i file installati.
+
+## Problemi comuni
+
+- **Non succede nulla**: `doctor` mostra "no turns logged" → l'hook non viene eseguito (policy, percorso, Node non nel PATH dell'IDE). Controlla i log degli agenti in VS Code.
+- **Turni registrati ma nessun avviso visibile**: il client non mostra stderr o `additionalContext`; l'avviso resta nel riepilogo.
+- **Falsi positivi**: alza `EFFORT_GUARD_THRESHOLD`.
+- **Verifica dei payload reali**: vedi [TESTING.md](../TESTING.md).
