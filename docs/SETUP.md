@@ -53,9 +53,22 @@ node ~/.copilot/effort-guard/effort-guard.mjs selftest   # prova locale senza Co
 
 `git pull` nel clone e ripeti `node scripts/install.mjs --user`: sovrascrive i file installati.
 
+## Verificare che sia attivo
+
+Copilot non permette a un hook di disegnare una barra o una notifica, quindi non c'è nulla di visibile finché non scatta l'avviso. Per vedere che gli hook girano:
+
+```
+node ~/.copilot/effort-guard/effort-guard.mjs doctor   # file hook trovato, ultime chiamate, stato di ogni progetto
+node ~/.copilot/effort-guard/effort-guard.mjs status   # stato della cartella corrente in una riga
+node ~/.copilot/effort-guard/effort-guard.mjs watch    # vista live in un secondo terminale
+```
+
+Ogni chiamata di un hook aggiunge una riga a `~/.copilot/effort-guard/events.log` (ora, evento, nome del tool, cartella; mai il contenuto), e anche gli avvisi (`WARNING`) finiscono lì. `doctor` mostra tutti i progetti, non solo la cartella da cui lo lanci: lo stato è per directory di lavoro, quindi lanciato dal repo di effort-guard non vede la tua sessione su un altro progetto.
+
 ## Problemi comuni
 
-- **Non succede nulla**: `doctor` mostra "no turns logged" → l'hook non viene eseguito (policy, percorso, Node non nel PATH dell'IDE). Controlla i log degli agenti in VS Code.
+- **`doctor` dice "no hook call recorded yet"**: riavvia Copilot CLI (gli hook si leggono all'avvio, una sessione già aperta non li vede), manda un prompt che faccia usare un tool e ripeti `doctor`. Se resta vuoto, la CLI non carica `~/.copilot/hooks` (versione, `COPILOT_HOME`, policy): lancia `copilot` con `COPILOT_HOME` impostato come in `doctor` e controlla la versione.
+- **Gli hook girano ma non vedi l'avviso**: secondo la documentazione GitHub l'output degli hook `userPromptSubmitted` definiti in file viene ignorato dalla CLI, e non è chiaro dove finisca stderr. L'avviso è comunque in `events.log` e in `watch`.
 - **Turni registrati ma nessun avviso visibile**: il client non mostra stderr o `additionalContext`; l'avviso resta nel riepilogo.
 - **Falsi positivi**: alza `EFFORT_GUARD_THRESHOLD`.
 - **Verifica dei payload reali**: vedi [TESTING.md](../TESTING.md).

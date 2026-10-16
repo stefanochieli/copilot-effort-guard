@@ -22,7 +22,7 @@ if (target === '--uninstall') {
   console.error('usage: node scripts/install.mjs <repo-dir> | --user [--uninstall]')
   process.exit(1)
 }
-const base = user ? join(homedir(), '.copilot') : resolve(target)
+const base = user ? (process.env.COPILOT_HOME ?? join(homedir(), '.copilot')) : resolve(target)
 const codeDir = user ? join(base, 'effort-guard') : join(base, '.effort-guard-hooks')
 const hooksDir = user ? join(base, 'hooks') : join(base, '.github', 'hooks')
 const entry = user ? join(codeDir, 'effort-guard.mjs') : '.effort-guard-hooks/effort-guard.mjs'
