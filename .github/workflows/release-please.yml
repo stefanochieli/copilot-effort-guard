@@ -1,0 +1,62 @@
+name: Release
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    env:
+      # Secrets cannot be read in a step's `if`; expose only whether it is set.
+      HAS_RELEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN != '' }}
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          # Optional: with a PAT or GitHub App token (secret RELEASE_PLEASE_TOKEN)
+          # the release PR triggers the normal pull_request workflows by itself.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      # prs_created is true only when a release PR was created or updated.
+      # A PR opened or updated with GITHUB_TOKEN does not trigger CI, and the
+      # ruleset requires the "checks" status. Dispatch CI on the release branch:
+      # its check run attaches to the PR head commit.
+      - name: Run CI on the release PR
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # No checkout in this job: tell gh which repository to act on.
+          GH_REPO: ${{ github.repository }}
+          PR_JSON: ${{ steps.release.outputs.pr }}
+        run: |
+          branch=$(jq -r '.headBranchName // empty' <<< "$PR_JSON")
+          if [ -z "$branch" ]; then
+            echo "No release branch in the action output; nothing to dispatch."
+            exit 0
+          fi
+          gh workflow run ci.yml --ref "$branch"
+      # Releases go out on their own when RELEASE_PLEASE_TOKEN is set: GitHub
+      # merges the release PR once the required checks pass, and because the
+      # merge is made with a PAT it triggers this workflow again, which tags
+      # and publishes. With only GITHUB_TOKEN the merge would not trigger it
+      # (no tag), so without the secret the release PR is merged by hand.
+      - name: Auto-merge the release PR
+        if: ${{ steps.release.outputs.prs_created == 'true' && env.HAS_RELEASE_TOKEN == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_JSON: ${{ steps.release.outputs.pr }}
+        run: |
+          number=$(jq -r '.number // empty' <<< "$PR_JSON")
+          if [ -z "$number" ]; then
+            echo "No release PR number in the action output; nothing to merge."
+            exit 0
+          fi
+          gh pr merge "$number" --auto --merge
