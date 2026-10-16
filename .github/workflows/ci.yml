@@ -3,8 +3,15 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Dispatched by release-please.yml on the release PR branch: a PR opened with
+  # GITHUB_TOKEN does not trigger pull_request workflows, so without this the
+  # required "checks" would never run on it.
+  workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   checks:
     runs-on: ubuntu-latest
@@ -14,7 +21,10 @@ jobs:
         with:
           node-version: 22
       - name: JSON syntax
-        run: node -e "JSON.parse(require('fs').readFileSync('.github/hooks/effort-guard.json','utf8'))"
+        run: |
+          for f in .github/hooks/effort-guard.json release-please-config.json .release-please-manifest.json; do
+            node -e "JSON.parse(require('fs').readFileSync('$f','utf8'))" && echo "ok $f"
+          done
       - run: npm test
       - name: Selftest
         run: node src/effort-guard.mjs selftest
