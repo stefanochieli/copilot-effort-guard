@@ -106,3 +106,17 @@ test('a per-user install keeps state outside the project, one folder per cwd', (
   assert.notEqual(a, stateDir('/work/b', self))
   assert.equal(stateDir('/work/a', '/repo/src/effort-guard.mjs'), join('/work/a', '.effort-guard'))
 })
+
+test('every hook call leaves a line in events.log, doctor and status read it', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'eg-'))
+  const env = { ...process.env, EFFORT_GUARD_DIR: dir }
+  const call = (arg, payload = {}) =>
+    execFileSync('node', ['src/effort-guard.mjs', arg], { input: JSON.stringify(payload), env, encoding: 'utf8' })
+  call('prompt')
+  call('tool', failingTest)
+  const log = readFileSync(join(dir, 'events.log'), 'utf8')
+  assert.match(log, /prompt struggled=false/)
+  assert.match(log, /tool tool=bash struggled=true/)
+  assert.match(call('doctor'), /last hook calls:/)
+  assert.match(call('status'), /current turn struggling/)
+})
