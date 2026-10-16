@@ -24,3 +24,7 @@ Niente banda sopra il prompt, toast o slash command (Copilot non li offre) e gli
 ```
 npm test
 ```
+
+## Rilasci
+
+Flusso: i rami di lavoro partono da `develop` e tornano su `develop` con PR; quando la situazione è stabile si alza `version` in `package.json` su `develop` e si mergia la PR `develop` → `main`. Il workflow `release.yml` crea in automatico il tag `vX.Y.Z` e la GitHub Release con le note generate (se il tag esiste già non fa nulla).
