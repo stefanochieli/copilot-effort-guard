@@ -10,7 +10,7 @@
 // Observation only: it never denies a tool call. Payload field names are read
 // defensively because Copilot delivers camelCase or snake_case depending on the
 // event key casing and version.
-import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
@@ -75,6 +75,10 @@ export function normaliseEvent(name) {
       return 'selftest'
     case 'doctor':
       return 'doctor'
+    case 'status':
+      return 'status'
+    case 'watch':
+      return 'watch'
     default:
       return null
   }
@@ -152,13 +156,17 @@ export function summary(state) {
   return `effort-guard: ${state.log.length} turns, ${struggled.length} struggling${top ? ` (most common: ${top[0]})` : ''}.`
 }
 
+export function copilotHome() {
+  return process.env.COPILOT_HOME ?? join(homedir(), '.copilot')
+}
+
 // Per-user install (script under ~/.copilot): keep state out of the projects,
 // one folder per working directory. Otherwise: .effort-guard/ in the project.
 export function stateDir(cwd = process.cwd(), self = fileURLToPath(import.meta.url)) {
   if (process.env.EFFORT_GUARD_DIR) {
     return process.env.EFFORT_GUARD_DIR
   }
-  if (self.startsWith(join(homedir(), '.copilot'))) {
+  if (self.startsWith(copilotHome())) {
     return join(dirname(self), 'state', createHash('sha1').update(cwd).digest('hex').slice(0, 12))
   }
   return join(cwd, '.effort-guard')
@@ -183,6 +191,34 @@ function save(path, state) {
 
 // EFFORT_GUARD_DEBUG=1 keeps every raw payload, so the real field names of a
 // Copilot version can be checked and the fixtures updated.
+// Folder shared by all working directories: holds events.log (one line per hook
+// call, no tool output) so "do the hooks fire at all?" can be answered.
+export function homeDir(self = fileURLToPath(import.meta.url)) {
+  return self.startsWith(copilotHome()) ? dirname(self) : stateDir()
+}
+
+function logEvent(event, payload, state, now = new Date()) {
+  const dir = homeDir()
+  const path = join(dir, 'events.log')
+  mkdirSync(dir, { recursive: true })
+  const { tool } = readTool(payload)
+  const line = `${now.toISOString()} ${event}${tool ? ` tool=${tool}` : ''} struggled=${state.turn.struggled} streak=${state.streak} cwd=${process.cwd()}\n`
+  appendFileSync(path, line)
+  try {
+    if (statSync(path).size > 200_000) {
+      writeFileSync(path, readFileSync(path, 'utf8').split('\n').slice(-500).join('\n'))
+    }
+  } catch {}
+}
+
+function lastEvents(n) {
+  try {
+    return readFileSync(join(homeDir(), 'events.log'), 'utf8').trim().split('\n').slice(-n)
+  } catch {
+    return []
+  }
+}
+
 function debugDump(event, payload) {
   if (!process.env.EFFORT_GUARD_DEBUG) {
     return
@@ -244,13 +280,51 @@ function selftest() {
   process.exitCode = out.length === 1 ? 0 : 1
 }
 
+function projectStates() {
+  const root = join(homeDir(), 'state')
+  try {
+    return readdirSync(root).map(d => ({ dir: join(root, d), state: load(join(root, d, 'state.json')) }))
+  } catch {
+    return []
+  }
+}
+
 function doctor() {
   const dir = stateDir()
+  const hooksFile = join(copilotHome(), 'hooks', 'effort-guard.json')
   console.log(`node ${process.version}`)
-  console.log(`state dir: ${dir} (${existsSync(dir) ? 'exists' : 'not created yet'})`)
+  console.log(`hooks file: ${hooksFile} (${existsSync(hooksFile) ? 'found' : 'MISSING: run scripts/install.mjs --user'})`)
+  console.log(`state dir for this folder: ${dir} (${existsSync(dir) ? 'exists' : 'not created yet'})`)
   console.log(`threshold: ${Math.max(1, Math.floor(Number(process.env.EFFORT_GUARD_THRESHOLD)) || DEFAULT_THRESHOLD)}`)
   console.log(`debug payload dump: ${process.env.EFFORT_GUARD_DEBUG ? 'on' : 'off (set EFFORT_GUARD_DEBUG=1)'}`)
-  console.log(summary(load(statePath())))
+  const events = lastEvents(5)
+  console.log(events.length ? `last hook calls:\n  ${events.join('\n  ')}` : 'no hook call recorded yet: restart Copilot (hooks load at startup) and send a prompt')
+  const projects = projectStates()
+  for (const p of projects) {
+    console.log(`- ${p.state.cwd ?? p.dir}: ${summary(p.state)} streak=${p.state.streak}`)
+  }
+  if (!projects.length) {
+    console.log(summary(load(statePath())))
+  }
+}
+
+function status() {
+  const s = load(statePath())
+  console.log(`${summary(s)} | streak ${s.streak}/${Math.max(1, Math.floor(Number(process.env.EFFORT_GUARD_THRESHOLD)) || DEFAULT_THRESHOLD)} | current turn ${s.turn.struggled ? `struggling (${s.turn.reason})` : 'ok'}`)
+}
+
+// Live view for a second terminal: Copilot has no status bar a hook can draw on.
+function watch() {
+  let last = null
+  console.log('effort-guard watch (Ctrl+C to stop)')
+  setInterval(() => {
+    const lines = lastEvents(500)
+    const fresh = last === null ? lines.slice(-5) : lines.slice(lines.lastIndexOf(last) + 1)
+    for (const l of fresh) {
+      console.log(l)
+    }
+    last = lines.at(-1) ?? last
+  }, 1000)
 }
 
 function main() {
@@ -262,6 +336,12 @@ function main() {
   }
   if (arg === 'doctor') {
     return doctor()
+  }
+  if (arg === 'status') {
+    return status()
+  }
+  if (arg === 'watch') {
+    return watch()
   }
   if (arg === 'summary') {
     return console.log(summary(load(statePath())))
@@ -276,7 +356,12 @@ function main() {
 
   const path = statePath()
   const result = run(event, payload, load(path), threshold)
+  result.state = { ...result.state, cwd: process.cwd() }
   save(path, result.state)
+  logEvent(event, payload, result.state)
+  if (result.stderr) {
+    appendFileSync(join(homeDir(), 'events.log'), `${new Date().toISOString()} WARNING ${result.stderr}\n`)
+  }
 
   if (result.stderr) {
     // stderr is shown to the user; stdout JSON is offered to the agent as context.
