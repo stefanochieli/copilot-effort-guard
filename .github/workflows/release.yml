@@ -1,0 +1,24 @@
+name: Release
+# Merging develop into main tags the version in package.json and publishes a
+# GitHub Release with generated notes. Bump "version" in package.json on develop
+# before opening the develop -> main PR; if the tag already exists nothing happens.
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="v$(node -p "require('./package.json').version")"
+          if gh release view "$version" >/dev/null 2>&1; then
+            echo "$version already released, nothing to do"
+            exit 0
+          fi
+          gh release create "$version" --target "$GITHUB_SHA" --title "$version" --generate-notes
