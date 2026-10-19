@@ -68,6 +68,7 @@ Ogni chiamata di un hook aggiunge una riga a `~/.copilot/effort-guard/events.log
 ## Problemi comuni
 
 - **`doctor` dice "no hook call recorded yet"**: riavvia Copilot CLI (gli hook si leggono all'avvio, una sessione già aperta non li vede), manda un prompt che faccia usare un tool e ripeti `doctor`. Se resta vuoto, la CLI non carica `~/.copilot/hooks` (versione, `COPILOT_HOME`, policy): lancia `copilot` con `COPILOT_HOME` impostato come in `doctor` e controlla la versione.
+- **`doctor` resta vuoto anche dopo il riavvio**: prova a registrare gli stessi comandi come hook inline in `~/.copilot/config.json` (stessi eventi e stessi comandi di `~/.copilot/hooks/effort-guard.json`). È un ripiego non ancora verificato su una CLI reale: se funziona, segnalalo.
 - **Gli hook girano ma non vedi l'avviso**: secondo la documentazione GitHub l'output degli hook `userPromptSubmitted` definiti in file viene ignorato dalla CLI, e non è chiaro dove finisca stderr. L'avviso è comunque in `events.log` e in `watch`.
 - **Turni registrati ma nessun avviso visibile**: il client non mostra stderr o `additionalContext`; l'avviso resta nel riepilogo.
 - **Falsi positivi**: alza `EFFORT_GUARD_THRESHOLD`.
