@@ -1,0 +1,42 @@
+name: sync-develop
+
+# Dopo ogni merge su main (PR develop -> main, PR di release di release-please) riporta main dentro develop,
+# cosi' develop non resta mai indietro del commit di release (versione, manifest, changelog).
+# Se il push diretto su develop e' bloccato dalla ruleset, apre una PR main -> develop.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-develop
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+      - name: Merge di main in develop
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git merge-base --is-ancestor origin/main HEAD; then
+            echo "develop contiene gia' main: niente da fare."
+            exit 0
+          fi
+          git merge --no-edit origin/main
+          if ! git push origin HEAD:develop; then
+            echo "Push diretto su develop rifiutato: apro una PR main -> develop."
+            gh pr create --base develop --head main \
+              --title "chore: sync main into develop" \
+              --body "Riallineamento automatico di develop dopo il merge su main."
+          fi
