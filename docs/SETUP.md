@@ -13,7 +13,7 @@ cd copilot-effort-guard
 node scripts/install.mjs --user
 ```
 
-Cosa fa: copia `effort-guard.mjs` e `detect.mjs` in `~/.copilot/effort-guard/` e scrive `~/.copilot/hooks/effort-guard.json`, con il percorso assoluto dello script (su Windows `%USERPROFILE%\.copilot\...`). Vale per tutti i progetti. Lo stato non finisce nei repository: sta in `~/.copilot/effort-guard/state/<cartella>`, una cartella per ogni directory di lavoro.
+Cosa fa: copia `effort-guard.mjs`, `detect.mjs` e `report.mjs` in `~/.copilot/effort-guard/` e scrive `~/.copilot/hooks/effort-guard.json`, con il percorso assoluto dello script (su Windows `%USERPROFILE%\.copilot\...`). Vale per tutti i progetti. Lo stato non finisce nei repository: sta in `~/.copilot/effort-guard/state/<cartella>`, una cartella per ogni directory di lavoro.
 
 Poi:
 
@@ -64,6 +64,14 @@ node ~/.copilot/effort-guard/effort-guard.mjs watch    # vista live in un second
 ```
 
 Ogni chiamata di un hook aggiunge una riga a `~/.copilot/effort-guard/events.log` (ora, evento, nome del tool, cartella; mai il contenuto), e anche gli avvisi (`WARNING`) finiscono lì. `doctor` mostra tutti i progetti, non solo la cartella da cui lo lanci: lo stato è per directory di lavoro, quindi lanciato dal repo di effort-guard non vede la tua sessione su un altro progetto.
+
+## Più sessioni in parallelo
+
+`events.log` e `doctor` indicano per ogni chiamata la **sorgente** (`vscode-chat` = chat agente di VS Code, `cli` = Copilot CLI, `cli@vscode` = CLI in un terminale di VS Code) e un **id di sessione**: quello del payload se c'è (VS Code), altrimenti l'id della scheda del terminale (`t-...`, da `WT_SESSION`). Con `-` il payload non aveva alcun id. Lo stato resta per cartella di lavoro: due sessioni nella stessa cartella condividono la serie di turni faticosi.
+
+## Indicatore nella status bar di VS Code
+
+Per avere un indicatore sempre visibile (`effort 1/3`, giallo alla soglia, con notifica) c'è l'estensione in [`vscode-extension/`](../vscode-extension/README.md): legge lo stato scritto dagli hook, quindi copre sia la chat agente sia la Copilot CLI nel terminale di VS Code. Va installata dopo gli hook.
 
 ## Problemi comuni
 

@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { looksLikeTestFailure } from './detect.mjs'
+import { formatDoctor } from './report.mjs'
 
 const DEFAULT_THRESHOLD = 3
 const LOG_LIMIT = 500
@@ -45,6 +46,21 @@ export function readTool(payload) {
     command: pick(parsed, 'command', 'cmd') ?? '',
     text: typeof text === 'string' ? text : JSON.stringify(text),
   }
+}
+
+// Which Copilot session called the hook. VS Code payloads carry session_id and
+// hook_event_name; Copilot CLI payloads may not, so fall back to the terminal id
+// the shell exports (Windows Terminal, VS Code terminals), which differs per tab.
+// Best effort: the label only helps the human reading doctor, it never drives logic.
+export function readSession(payload, env = process.env) {
+  const id = pick(payload, 'session_id', 'sessionId', 'conversation_id', 'conversationId')
+  const vscodePayload = pick(payload, 'hook_event_name', 'session_id') !== undefined
+  const terminal = env.WT_SESSION || env.TERM_SESSION_ID || env.VSCODE_GIT_IPC_HANDLE
+  const source = vscodePayload ? 'vscode-chat' : env.TERM_PROGRAM === 'vscode' ? 'cli@vscode' : 'cli'
+  const short = v => String(v).replace(/[^A-Za-z0-9]/g, '').slice(-8)
+  if (id) return { id: short(id), source }
+  if (terminal) return { id: `t-${short(terminal)}`, source }
+  return { id: '-', source }
 }
 
 function safeJson(s) {
@@ -198,11 +214,12 @@ export function homeDir(self = fileURLToPath(import.meta.url)) {
 }
 
 function logEvent(event, payload, state, now = new Date()) {
+  const { id, source } = readSession(payload)
   const dir = homeDir()
   const path = join(dir, 'events.log')
   mkdirSync(dir, { recursive: true })
   const { tool } = readTool(payload)
-  const line = `${now.toISOString()} ${event}${tool ? ` tool=${tool}` : ''} struggled=${state.turn.struggled} streak=${state.streak} cwd=${process.cwd()}\n`
+  const line = `${now.toISOString()} ${event}${tool ? ` tool=${tool}` : ''} struggled=${state.turn.struggled} streak=${state.streak} session=${id} src=${source} cwd=${process.cwd()}\n`
   appendFileSync(path, line)
   try {
     if (statSync(path).size > 200_000) {
@@ -292,20 +309,39 @@ function projectStates() {
 function doctor() {
   const dir = stateDir()
   const hooksFile = join(copilotHome(), 'hooks', 'effort-guard.json')
-  console.log(`node ${process.version}`)
-  console.log(`hooks file: ${hooksFile} (${existsSync(hooksFile) ? 'found' : 'MISSING: run scripts/install.mjs --user'})`)
-  console.log(`state dir for this folder: ${dir} (${existsSync(dir) ? 'exists' : 'not created yet'})`)
-  console.log(`threshold: ${Math.max(1, Math.floor(Number(process.env.EFFORT_GUARD_THRESHOLD)) || DEFAULT_THRESHOLD)}`)
-  console.log(`debug payload dump: ${process.env.EFFORT_GUARD_DEBUG ? 'on' : 'off (set EFFORT_GUARD_DEBUG=1)'}`)
-  const events = lastEvents(5)
-  console.log(events.length ? `last hook calls:\n  ${events.join('\n  ')}` : 'no hook call recorded yet: restart Copilot (hooks load at startup) and send a prompt')
-  const projects = projectStates()
-  for (const p of projects) {
-    console.log(`- ${p.state.cwd ?? p.dir}: ${summary(p.state)} streak=${p.state.streak}`)
-  }
-  if (!projects.length) {
-    console.log(summary(load(statePath())))
-  }
+  const found = projectStates()
+  const own = existsSync(statePath()) ? [{ dir, state: load(statePath()) }] : []
+  const projects = (found.length ? found : own).map(p => {
+    const log = p.state.log ?? []
+    const struggled = log.filter(e => e.struggled)
+    const reasons = {}
+    for (const e of struggled) {
+      reasons[e.reason] = (reasons[e.reason] ?? 0) + 1
+    }
+    return {
+      cwd: p.state.cwd,
+      dir: p.dir,
+      turns: log.length,
+      struggling: struggled.length,
+      streak: p.state.streak,
+      topReason: Object.entries(reasons).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null,
+      updated: p.state.updated ?? null,
+      session: p.state.session ?? null,
+    }
+  })
+  console.log(
+    formatDoctor({
+      nodeVersion: process.version,
+      hooksFile,
+      hooksFound: existsSync(hooksFile),
+      stateDir: dir,
+      stateExists: existsSync(dir),
+      threshold: Math.max(1, Math.floor(Number(process.env.EFFORT_GUARD_THRESHOLD)) || DEFAULT_THRESHOLD),
+      debug: Boolean(process.env.EFFORT_GUARD_DEBUG),
+      events: lastEvents(200),
+      projects,
+    }),
+  )
 }
 
 function status() {
@@ -356,7 +392,7 @@ function main() {
 
   const path = statePath()
   const result = run(event, payload, load(path), threshold)
-  result.state = { ...result.state, cwd: process.cwd() }
+  result.state = { ...result.state, cwd: process.cwd(), updated: new Date().toISOString(), threshold, session: readSession(payload) }
   save(path, result.state)
   logEvent(event, payload, result.state)
   if (result.stderr) {

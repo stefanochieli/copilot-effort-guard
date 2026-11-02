@@ -1,0 +1,39 @@
+{
+  "name": "copilot-effort-guard-status",
+  "displayName": "Copilot Effort Guard",
+  "description": "Status bar indicator for copilot-effort-guard: shows how many struggling Copilot turns in a row.",
+  "version": "0.1.0",
+  "publisher": "stefanochieli",
+  "license": "MIT",
+  "private": true,
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "commands": [
+      { "command": "effortGuard.showReport", "title": "Effort Guard: Show report" }
+    ],
+    "configuration": {
+      "title": "Copilot Effort Guard",
+      "properties": {
+        "effortGuard.copilotHome": {
+          "type": "string",
+          "default": "",
+          "description": "Copilot home folder (the one that contains effort-guard/). Empty: COPILOT_HOME or ~/.copilot."
+        },
+        "effortGuard.threshold": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "description": "Fallback threshold, used only if the hook state does not record one (it normally does)."
+        },
+        "effortGuard.notify": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a notification when the warning threshold is reached."
+        }
+      }
+    }
+  }
+}
