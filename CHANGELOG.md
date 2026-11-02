@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.2.1...v0.3.0) (2026-11-02)
+
+
+### Features
+
+* suggest a lighter model after a long run of clean turns ([#22](https://github.com/stefanochieli/copilot-effort-guard/issues/22)) ([64a243e](https://github.com/stefanochieli/copilot-effort-guard/commit/64a243e7a1d2a9a06d5cf0ebf33ce59558c571ad))
+
 ## [0.2.1](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.2.0...v0.2.1) (2026-11-02)
 
 
