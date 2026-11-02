@@ -2,7 +2,7 @@
   "name": "copilot-effort-guard-status",
   "displayName": "Copilot Effort Guard",
   "description": "Status bar indicator for copilot-effort-guard: shows how many struggling Copilot turns in a row.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "stefanochieli",
   "license": "MIT",
   "repository": {
