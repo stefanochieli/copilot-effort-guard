@@ -117,6 +117,72 @@ test('every hook call leaves a line in events.log, doctor and status read it', (
   const log = readFileSync(join(dir, 'events.log'), 'utf8')
   assert.match(log, /prompt struggled=false/)
   assert.match(log, /tool tool=bash struggled=true/)
-  assert.match(call('doctor'), /last hook calls:/)
+  assert.match(call('doctor'), /Are the hooks running\?\n-+\n\s+\[ok\] last call/)
   assert.match(call('status'), /current turn struggling/)
+})
+
+import { formatDoctor, parseEventLine, baseName } from '../src/report.mjs'
+
+test('doctor report: hooks running, warnings and projects are laid out readably', () => {
+  const now = new Date('2026-11-02T14:30:00')
+  const events = [
+    '2026-11-02T14:27:19.547Z tool tool=read_file struggled=false streak=0 cwd=C:\\Users\\x\\proj',
+    '2026-11-02T14:27:25.000Z WARNING effort-guard: 3 struggling turns in a row',
+  ]
+  const text = formatDoctor(
+    {
+      nodeVersion: 'v24.0.0',
+      hooksFile: '/h/effort-guard.json',
+      hooksFound: true,
+      stateDir: '/s',
+      stateExists: true,
+      threshold: 3,
+      debug: false,
+      events,
+      projects: [{ cwd: 'C:\\Users\\x\\proj', dir: '/s/a', turns: 38, struggling: 2, streak: 1, topReason: 'tool_error', updated: '2026-11-02T14:27:25.000Z' }],
+    },
+    now,
+  )
+  assert.match(text, /\[ok\] hooks file found/)
+  assert.match(text, /read_file\s+ok\s+0\s+proj/)
+  assert.match(text, /\[!!\].*3 struggling turns/)
+  assert.match(text, /proj\s+38\s+2\s+1\/3\s+tool_error/)
+})
+
+test('doctor report: says what to do when no hook was called', () => {
+  const text = formatDoctor({ nodeVersion: 'v1', hooksFile: 'f', hooksFound: false, stateDir: 's', stateExists: false, threshold: 3, debug: true, events: [], projects: [] })
+  assert.match(text, /hooks file MISSING/)
+  assert.match(text, /no hook call recorded yet/)
+  assert.match(text, /no state recorded yet/)
+})
+
+test('event lines parse and folder names are extracted on Windows and POSIX paths', () => {
+  assert.equal(parseEventLine('garbage'), null)
+  assert.equal(parseEventLine('2026-11-02T14:27:19.547Z prompt struggled=true streak=2 cwd=/a/b').streak, 2)
+  assert.equal(baseName('C:\\a\\b\\proj'), 'proj')
+  assert.equal(baseName('/a/b/proj/'), 'proj')
+})
+
+import { readSession } from '../src/effort-guard.mjs'
+
+test('readSession tells VS Code chat from the CLI and falls back to the terminal tab id', () => {
+  assert.deepEqual(readSession({ session_id: 'abc-12345678', hook_event_name: 'PostToolUse' }, {}), { id: '12345678', source: 'vscode-chat' })
+  assert.deepEqual(readSession({}, { WT_SESSION: 'aaaa-bbbb-cccc' }), { id: 't-bbbbcccc', source: 'cli' })
+  assert.equal(readSession({}, { TERM_PROGRAM: 'vscode' }).source, 'cli@vscode')
+  assert.deepEqual(readSession({}, {}), { id: '-', source: 'cli' })
+})
+
+test('doctor report lists the sessions seen in the log, old log lines still parse', () => {
+  const events = [
+    '2026-11-02T14:00:00.000Z tool tool=bash struggled=false streak=0 session=t-bbbbcccc src=cli cwd=/w/a',
+    '2026-11-02T14:01:00.000Z prompt struggled=false streak=0 session=12345678 src=vscode-chat cwd=/w/a',
+    '2026-11-02T13:00:00.000Z tool tool=bash struggled=false streak=0 cwd=/w/old',
+  ]
+  const text = formatDoctor(
+    { nodeVersion: 'v1', hooksFile: 'f', hooksFound: true, stateDir: 's', stateExists: true, threshold: 3, debug: false, events, projects: [] },
+    new Date('2026-11-02T14:02:00'),
+  )
+  assert.match(text, /vscode-chat\s+12345678\s+a\s+1/)
+  assert.match(text, /cli\s+t-bbbbcccc\s+a\s+1/)
+  assert.match(text, /\?\s+-\s+old\s+1/)
 })

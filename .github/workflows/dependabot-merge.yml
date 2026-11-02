@@ -1,0 +1,38 @@
+name: dependabot-merge
+
+# Merge delle PR di Dependabot per aggiornamenti patch/minor, a CI verde. I major restano manuali.
+# Parte dopo il workflow CI (workflow_run); i workflow workflow_run girano solo se il file e' sul ramo predefinito (main).
+# Il merge avviene solo se TUTTI i check della PR sono verdi (gh pr checks). Metodo: squash, come per le altre PR verso develop.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  merge:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge se non e' un major e tutti i check sono verdi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          PR=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base develop --state open --json number --jq '.[0].number')
+          [ -n "$PR" ] || { echo "Nessuna PR aperta verso develop per $BRANCH"; exit 0; }
+          gh pr checks "$PR" --repo "$GITHUB_REPOSITORY" || { echo "Check non ancora tutti verdi sulla PR #$PR: riprovo al prossimo workflow."; exit 0; }
+          BODY=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+          PAIRS=$(printf '%s' "$BODY" | grep -oE 'from [v]?[0-9][0-9.]* to [v]?[0-9][0-9.]*' | sort -u || true)
+          [ -n "$PAIRS" ] || { echo "Versioni non riconoscibili nella PR #$PR: merge manuale."; exit 0; }
+          while read -r _ FROM _ TO; do
+            FM=${FROM#v}; FM=${FM%%.*}; TM=${TO#v}; TM=${TM%%.*}
+            if [ "$FM" != "$TM" ]; then echo "Aggiornamento major ($FROM -> $TO) nella PR #$PR: merge manuale."; exit 0; fi
+          done <<< "$PAIRS"
+          gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --squash
