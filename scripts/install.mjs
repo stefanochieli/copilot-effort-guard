@@ -37,7 +37,7 @@ if (uninstall) {
 
 mkdirSync(codeDir, { recursive: true })
 mkdirSync(hooksDir, { recursive: true })
-for (const f of ['effort-guard.mjs', 'detect.mjs']) {
+for (const f of ['effort-guard.mjs', 'detect.mjs', 'report.mjs']) {
   copyFileSync(join(root, 'src', f), join(codeDir, f))
 }
 // The copied files are ES modules even when the host repo is not.

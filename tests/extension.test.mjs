@@ -1,0 +1,47 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { createRequire } from 'node:module'
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+const lib = createRequire(import.meta.url)('../vscode-extension/lib.js')
+
+test('computeView: idle, ok, watch and warn levels', () => {
+  assert.equal(lib.computeView(null).level, 'idle')
+  assert.equal(lib.computeView({ streak: 0, turn: {}, log: [] }).level, 'ok')
+  assert.equal(lib.computeView({ streak: 1, threshold: 3, turn: {}, log: [] }).text, '$(pulse) effort 1/3')
+  const warn = lib.computeView({ streak: 3, threshold: 3, turn: {}, log: [] })
+  assert.equal(warn.level, 'warn')
+  assert.match(warn.tooltip, /stronger model/)
+  assert.equal(lib.computeView({ streak: 0, turn: { struggled: true, reason: 'tool_error' }, log: [] }).level, 'watch')
+})
+
+test('shouldNotify fires only when the streak crosses the threshold', () => {
+  assert.equal(lib.shouldNotify({ streak: 2 }, { streak: 3, threshold: 3 }), true)
+  assert.equal(lib.shouldNotify({ streak: 3 }, { streak: 4, threshold: 3 }), false)
+  assert.equal(lib.shouldNotify(null, { streak: 1, threshold: 3 }), false)
+  assert.equal(lib.shouldNotify({ streak: 2 }, null), false)
+})
+
+test('findState matches the workspace folder or a subfolder, case-insensitively on Windows paths, newest first', () => {
+  const projects = [
+    { dir: 'a', state: { cwd: 'C:\\Users\\x\\proj\\sub', updated: '2026-11-02T10:00:00Z', streak: 1 } },
+    { dir: 'b', state: { cwd: 'C:\\Users\\x\\proj', updated: '2026-11-02T12:00:00Z', streak: 2 } },
+    { dir: 'c', state: { cwd: 'C:\\Users\\x\\other', updated: '2026-11-02T13:00:00Z', streak: 0 } },
+  ]
+  assert.equal(lib.findState(projects, ['c:\\users\\x\\PROJ']).dir, 'b')
+  assert.equal(lib.findState(projects, ['C:\\Users\\x\\nothing']), null)
+  assert.equal(lib.isInside('/a/bc', '/a/b'), false)
+})
+
+test('readProjects loads state.json files written by the hooks', () => {
+  const home = mkdtempSync(join(tmpdir(), 'eg-ext-'))
+  mkdirSync(join(home, 'effort-guard', 'state', 'abc'), { recursive: true })
+  writeFileSync(join(home, 'effort-guard', 'state', 'abc', 'state.json'), JSON.stringify({ cwd: '/w', streak: 2, log: [] }))
+  const projects = lib.readProjects(home)
+  assert.equal(projects.length, 1)
+  assert.equal(projects[0].state.streak, 2)
+  assert.deepEqual(lib.readProjects(join(home, 'missing')), [])
+  assert.match(lib.formatReport(projects), /\/w\n  turns 0/)
+})

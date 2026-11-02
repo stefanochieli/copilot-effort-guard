@@ -45,6 +45,8 @@ Gli errori dello script finiscono su stderr e non interrompono mai l'agente. I n
 
 - `src/effort-guard.mjs`: transizioni di stato pure (`onTool`, `closeTurn`, `run`) e wrapper di I/O.
 - `src/detect.mjs`: riconoscimento dei comandi di test e dei testi di fallimento.
+- `src/report.mjs`: formattazione del report di `doctor`.
+- `vscode-extension/`: voce nella status bar di VS Code che legge `state.json`.
 - `scripts/install.mjs`: installazione utente/repository e disinstallazione.
 - `tests/`: `npm test` (Node test runner).
 
