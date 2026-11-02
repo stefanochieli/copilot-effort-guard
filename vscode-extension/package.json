@@ -5,14 +5,28 @@
   "version": "0.1.0",
   "publisher": "stefanochieli",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/stefanochieli/copilot-effort-guard.git",
+    "directory": "vscode-extension"
+  },
   "private": true,
-  "engines": { "vscode": "^1.85.0" },
-  "categories": ["Other"],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
   "main": "./extension.js",
-  "activationEvents": ["onStartupFinished"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
     "commands": [
-      { "command": "effortGuard.showReport", "title": "Effort Guard: Show report" }
+      {
+        "command": "effortGuard.showReport",
+        "title": "Effort Guard: Show report"
+      }
     ],
     "configuration": {
       "title": "Copilot Effort Guard",

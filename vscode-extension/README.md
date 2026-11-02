@@ -14,11 +14,11 @@ Prima installa gli hook (`node scripts/install.mjs --user`, vedi [SETUP](../docs
 
 ```
 cd vscode-extension
-npx @vscode/vsce package --no-dependencies --skip-license
-code --install-extension copilot-effort-guard-status-0.1.0.vsix
+npx --yes @vscode/vsce package --no-dependencies --skip-license
+code --install-extension copilot-effort-guard-status-0.1.0.vsix --force
 ```
 
-Ricarica la finestra (*Developer: Reload Window*).
+Se `code` non è nel PATH (Windows), usa il percorso completo (`%LOCALAPPDATA%\Programs\Microsoft VS Code\bin\code.cmd`) oppure *Extensions → … → Install from VSIX…* in VS Code. Poi ricarica la finestra (*Developer: Reload Window*).
 
 ## Impostazioni
 
