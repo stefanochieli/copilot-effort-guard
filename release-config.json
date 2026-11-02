@@ -5,7 +5,14 @@
       "release-type": "node",
       "package-name": "copilot-effort-guard",
       "include-component-in-tag": false,
-      "pull-request-title-pattern": "chore: release ${version}"
+      "pull-request-title-pattern": "chore: release ${version}",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "vscode-extension/package.json",
+          "jsonpath": "$.version"
+        }
+      ]
     }
   }
 }
