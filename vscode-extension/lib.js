@@ -45,14 +45,16 @@ function findState(projects, folders) {
   return matches[0] ?? null
 }
 
-// level: idle (no data), ok, watch (some struggle), warn (threshold reached).
+// level: idle (no data), ok, calm (long clean run: task may be easy), watch (some struggle), warn (threshold reached).
 function computeView(state, fallbackThreshold = 3) {
   if (!state) {
     return { level: 'idle', text: '$(pulse) effort -', tooltip: 'Effort Guard: no data for this folder yet. Use Copilot agent mode or the CLI here.' }
   }
   const threshold = state.threshold || fallbackThreshold
   const streak = state.streak || 0
-  const level = streak >= threshold ? 'warn' : streak > 0 || state.turn?.struggled ? 'watch' : 'ok'
+  const calm = state.calm || 0
+  const calmThreshold = state.calmThreshold || 8
+  const level = streak >= threshold ? 'warn' : streak > 0 || state.turn?.struggled ? 'watch' : calm >= calmThreshold ? 'calm' : 'ok'
   const log = state.log ?? []
   const struggled = log.filter(e => e.struggled).length
   const lines = [
@@ -63,17 +65,24 @@ function computeView(state, fallbackThreshold = 3) {
     lines.push(`Current turn: struggling (${state.turn.reason})`)
   }
   if (level === 'warn') {
-    lines.push('Consider switching to a stronger model or more reasoning effort.')
+    lines.push('Struggling: consider a stronger model or more reasoning effort.')
   }
-  return { level, text: `$(${level === 'warn' ? 'warning' : 'pulse'}) effort ${streak}/${threshold}`, tooltip: lines.join('\n') }
+  if (level === 'calm') {
+    lines.push(`${calm} clean turns in a row: if the task is simple, a lighter model or less reasoning saves tokens.`)
+  }
+  const icon = level === 'warn' ? 'warning' : level === 'calm' ? 'check' : 'pulse'
+  return { level, text: `$(${icon}) effort ${streak}/${threshold}`, tooltip: lines.join('\n'), message: level === 'warn' ? 'Effort Guard: the model seems to be struggling. Consider a stronger model or more reasoning effort.' : level === 'calm' ? `Effort Guard: ${calm} clean turns in a row. If the task is simple, a lighter model or less reasoning saves tokens.` : null }
 }
 
-// True when the streak has just reached the threshold since the previous check.
+// Which notification to show, if any: 'warn' when the streak has just reached the
+// threshold, 'calm' when the clean run has just reached the calm threshold.
 function shouldNotify(prev, cur, fallbackThreshold = 3) {
-  if (!cur) return false
+  if (!cur) return null
   const threshold = cur.threshold || fallbackThreshold
-  const before = prev?.streak || 0
-  return (cur.streak || 0) >= threshold && before < threshold
+  if ((cur.streak || 0) >= threshold && (prev?.streak || 0) < threshold) return 'warn'
+  const calmThreshold = cur.calmThreshold || 8
+  if ((cur.calm || 0) >= calmThreshold && (prev?.calm || 0) < calmThreshold) return 'calm'
+  return null
 }
 
 function formatReport(projects, now = Date.now()) {

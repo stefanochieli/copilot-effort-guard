@@ -7,6 +7,10 @@ export function parseEventLine(line) {
   if (warning) {
     return { ts: warning[1], kind: 'warning', text: warning[2] }
   }
+  const info = line.match(/^(\S+) INFO (.*)$/)
+  if (info) {
+    return { ts: info[1], kind: 'info', text: info[2] }
+  }
   const m = line.match(EVENT_RE)
   if (!m) {
     return null
@@ -71,7 +75,7 @@ export function formatDoctor(info, now = new Date()) {
 
   const events = info.events.map(parseEventLine).filter(Boolean)
   const calls = events.filter(e => e.kind === 'event')
-  const warnings = events.filter(e => e.kind === 'warning')
+  const warnings = events.filter(e => e.kind === 'warning' || e.kind === 'info')
 
   section('Are the hooks running?')
   if (calls.length === 0) {
@@ -110,12 +114,12 @@ export function formatDoctor(info, now = new Date()) {
     out.push('  session "t-..." is the terminal tab id and "-" means the payload had no id: sessions in the same folder then share one streak.')
   }
 
-  section('Warnings')
+  section('Warnings and hints')
   if (warnings.length === 0) {
     out.push('  none in the recent log.')
   } else {
     for (const w of warnings.slice(-3)) {
-      out.push(`  ${bad} ${formatTime(w.ts, now)}  ${w.text}`)
+      out.push(`  ${w.kind === 'info' ? '[..]' : bad} ${formatTime(w.ts, now)}  ${w.text}`)
     }
   }
 

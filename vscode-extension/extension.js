@@ -22,8 +22,11 @@ function refresh() {
   item.tooltip = view.tooltip
   item.backgroundColor = view.level === 'warn' ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined
 
-  if (notify && lib.shouldNotify(previous, state, threshold)) {
-    vscode.window.showWarningMessage(view.tooltip.split('\n').filter(Boolean).join(' - '))
+  const kind = notify ? lib.shouldNotify(previous, state, threshold) : null
+  if (kind === 'warn') {
+    vscode.window.showWarningMessage(view.message)
+  } else if (kind === 'calm') {
+    vscode.window.showInformationMessage(view.message)
   }
   previous = state
 }
