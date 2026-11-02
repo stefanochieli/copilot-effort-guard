@@ -48,6 +48,21 @@ export function readTool(payload) {
   }
 }
 
+// Which Copilot session called the hook. VS Code payloads carry session_id and
+// hook_event_name; Copilot CLI payloads may not, so fall back to the terminal id
+// the shell exports (Windows Terminal, VS Code terminals), which differs per tab.
+// Best effort: the label only helps the human reading doctor, it never drives logic.
+export function readSession(payload, env = process.env) {
+  const id = pick(payload, 'session_id', 'sessionId', 'conversation_id', 'conversationId')
+  const vscodePayload = pick(payload, 'hook_event_name', 'session_id') !== undefined
+  const terminal = env.WT_SESSION || env.TERM_SESSION_ID || env.VSCODE_GIT_IPC_HANDLE
+  const source = vscodePayload ? 'vscode-chat' : env.TERM_PROGRAM === 'vscode' ? 'cli@vscode' : 'cli'
+  const short = v => String(v).replace(/[^A-Za-z0-9]/g, '').slice(-8)
+  if (id) return { id: short(id), source }
+  if (terminal) return { id: `t-${short(terminal)}`, source }
+  return { id: '-', source }
+}
+
 function safeJson(s) {
   try {
     return JSON.parse(s)
@@ -199,11 +214,12 @@ export function homeDir(self = fileURLToPath(import.meta.url)) {
 }
 
 function logEvent(event, payload, state, now = new Date()) {
+  const { id, source } = readSession(payload)
   const dir = homeDir()
   const path = join(dir, 'events.log')
   mkdirSync(dir, { recursive: true })
   const { tool } = readTool(payload)
-  const line = `${now.toISOString()} ${event}${tool ? ` tool=${tool}` : ''} struggled=${state.turn.struggled} streak=${state.streak} cwd=${process.cwd()}\n`
+  const line = `${now.toISOString()} ${event}${tool ? ` tool=${tool}` : ''} struggled=${state.turn.struggled} streak=${state.streak} session=${id} src=${source} cwd=${process.cwd()}\n`
   appendFileSync(path, line)
   try {
     if (statSync(path).size > 200_000) {
@@ -310,6 +326,7 @@ function doctor() {
       streak: p.state.streak,
       topReason: Object.entries(reasons).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null,
       updated: p.state.updated ?? null,
+      session: p.state.session ?? null,
     }
   })
   console.log(
@@ -375,7 +392,7 @@ function main() {
 
   const path = statePath()
   const result = run(event, payload, load(path), threshold)
-  result.state = { ...result.state, cwd: process.cwd(), updated: new Date().toISOString(), threshold }
+  result.state = { ...result.state, cwd: process.cwd(), updated: new Date().toISOString(), threshold, session: readSession(payload) }
   save(path, result.state)
   logEvent(event, payload, result.state)
   if (result.stderr) {

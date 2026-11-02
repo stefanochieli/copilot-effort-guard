@@ -1,6 +1,6 @@
 // Pure formatting for the `doctor` report: no I/O, so it can be tested.
 
-const EVENT_RE = /^(\S+) (\S+?)(?: tool=(\S+))? struggled=(true|false) streak=(\d+) cwd=(.*)$/
+const EVENT_RE = /^(\S+) (\S+?)(?: tool=(\S+))? struggled=(true|false) streak=(\d+)(?: session=(\S+) src=(\S+))? cwd=(.*)$/
 
 export function parseEventLine(line) {
   const warning = line.match(/^(\S+) WARNING (.*)$/)
@@ -11,7 +11,7 @@ export function parseEventLine(line) {
   if (!m) {
     return null
   }
-  return { ts: m[1], kind: 'event', event: m[2], tool: m[3] ?? null, struggled: m[4] === 'true', streak: Number(m[5]), cwd: m[6] }
+  return { ts: m[1], kind: 'event', event: m[2], tool: m[3] ?? null, struggled: m[4] === 'true', streak: Number(m[5]), session: m[6] ?? '-', source: m[7] ?? '?', cwd: m[8] }
 }
 
 export function baseName(path) {
@@ -83,10 +83,31 @@ export function formatDoctor(info, now = new Date()) {
     out.push('')
     out.push(
       table(
-        calls.slice(-8).map(e => [formatTime(e.ts, now), e.event, e.tool ?? '-', e.struggled ? 'struggling' : 'ok', e.streak, baseName(e.cwd)]),
-        ['time', 'event', 'tool', 'turn', 'streak', 'folder'],
+        calls.slice(-8).map(e => [formatTime(e.ts, now), e.source, e.session, e.event, e.tool ?? '-', e.struggled ? 'struggling' : 'ok', e.streak, baseName(e.cwd)]),
+        ['time', 'source', 'session', 'event', 'tool', 'turn', 'streak', 'folder'],
       ),
     )
+  }
+
+  section('Sessions seen in the recent log')
+  const groups = new Map()
+  for (const e of calls) {
+    const key = `${e.source}|${e.session}|${e.cwd}`
+    const g = groups.get(key) ?? { source: e.source, session: e.session, folder: baseName(e.cwd), calls: 0, last: e.ts, streak: 0 }
+    groups.set(key, { ...g, calls: g.calls + 1, last: e.ts, streak: e.streak })
+  }
+  if (groups.size === 0) {
+    out.push('  none.')
+  } else {
+    out.push(
+      table(
+        [...groups.values()].sort((a, b) => b.last.localeCompare(a.last)).map(g => [g.source, g.session, g.folder, g.calls, g.streak, relativeAge(g.last, now)]),
+        ['source', 'session', 'folder', 'calls', 'streak', 'last call'],
+      ),
+    )
+    out.push('')
+    out.push('  source: vscode-chat = agent chat, cli = Copilot CLI (cli@vscode = in a VS Code terminal).')
+    out.push('  session "t-..." is the terminal tab id and "-" means the payload had no id: sessions in the same folder then share one streak.')
   }
 
   section('Warnings')
@@ -111,9 +132,10 @@ export function formatDoctor(info, now = new Date()) {
           p.struggling,
           `${p.streak}/${info.threshold}`,
           p.topReason ?? '-',
+          p.session ? `${p.session.source}/${p.session.id}` : '-',
           p.updated ? relativeAge(p.updated, now) : '-',
         ]),
-        ['project', 'turns', 'struggling', 'streak', 'main cause', 'last activity'],
+        ['project', 'turns', 'struggling', 'streak', 'main cause', 'last session', 'last activity'],
       ),
     )
     out.push('')

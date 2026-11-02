@@ -162,3 +162,27 @@ test('event lines parse and folder names are extracted on Windows and POSIX path
   assert.equal(baseName('C:\\a\\b\\proj'), 'proj')
   assert.equal(baseName('/a/b/proj/'), 'proj')
 })
+
+import { readSession } from '../src/effort-guard.mjs'
+
+test('readSession tells VS Code chat from the CLI and falls back to the terminal tab id', () => {
+  assert.deepEqual(readSession({ session_id: 'abc-12345678', hook_event_name: 'PostToolUse' }, {}), { id: '12345678', source: 'vscode-chat' })
+  assert.deepEqual(readSession({}, { WT_SESSION: 'aaaa-bbbb-cccc' }), { id: 't-bbbbcccc', source: 'cli' })
+  assert.equal(readSession({}, { TERM_PROGRAM: 'vscode' }).source, 'cli@vscode')
+  assert.deepEqual(readSession({}, {}), { id: '-', source: 'cli' })
+})
+
+test('doctor report lists the sessions seen in the log, old log lines still parse', () => {
+  const events = [
+    '2026-11-02T14:00:00.000Z tool tool=bash struggled=false streak=0 session=t-bbbbcccc src=cli cwd=/w/a',
+    '2026-11-02T14:01:00.000Z prompt struggled=false streak=0 session=12345678 src=vscode-chat cwd=/w/a',
+    '2026-11-02T13:00:00.000Z tool tool=bash struggled=false streak=0 cwd=/w/old',
+  ]
+  const text = formatDoctor(
+    { nodeVersion: 'v1', hooksFile: 'f', hooksFound: true, stateDir: 's', stateExists: true, threshold: 3, debug: false, events, projects: [] },
+    new Date('2026-11-02T14:02:00'),
+  )
+  assert.match(text, /vscode-chat\s+12345678\s+a\s+1/)
+  assert.match(text, /cli\s+t-bbbbcccc\s+a\s+1/)
+  assert.match(text, /\?\s+-\s+old\s+1/)
+})
