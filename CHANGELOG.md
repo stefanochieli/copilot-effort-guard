@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.2.0...v0.2.1) (2026-11-02)
+
+
+### Bug Fixes
+
+* package the VS Code extension without extra vsce flags ([#19](https://github.com/stefanochieli/copilot-effort-guard/issues/19)) ([ca5fad6](https://github.com/stefanochieli/copilot-effort-guard/commit/ca5fad661b05cdabed21738cb490774619de3d19))
+
 ## [0.2.0](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.1.2...v0.2.0) (2026-11-02)
 
 
