@@ -19,6 +19,7 @@ import { looksLikeTestFailure } from './detect.mjs'
 import { formatDoctor } from './report.mjs'
 
 const DEFAULT_THRESHOLD = 3
+const DEFAULT_CALM = 8
 const LOG_LIMIT = 500
 
 export function pick(obj, ...keys) {
@@ -130,19 +131,25 @@ export function onTool(state, payload, { failed: failedEvent = false } = {}) {
 
 // Closes the previous turn: updates the streak and log. Returns the warning to
 // show, if the streak just reached the threshold.
-export function closeTurn(state, threshold, now = new Date()) {
+export function closeTurn(state, threshold, now = new Date(), calmThreshold = DEFAULT_CALM) {
   if (state.log.length === 0 && !state.turn.struggled && state.streak === 0 && !state.started) {
-    return { state: { ...state, started: true }, warning: null }
+    return { state: { ...state, started: true }, warning: null, notice: null }
   }
 
   const { struggled, reason, command } = state.turn
   const streak = struggled ? state.streak + 1 : 0
+  // Consecutive clean turns: a long calm run suggests the task is easy.
+  const calm = struggled ? 0 : (state.calm ?? 0) + 1
+  const notice =
+    calm === calmThreshold
+      ? `effort-guard: ${calm} clean turns in a row. If the task is simple, a lighter model or less reasoning effort would save tokens.`
+      : null
   const entry = { ts: now.toISOString(), struggled, reason, streak }
   const warning =
     streak === threshold
       ? `effort-guard: ${streak} struggling turns in a row (failed commands/tests)` +
         `${command ? `, last: ${command.slice(0, 60)}` : ''}. ` +
-        `Consider switching to a stronger model or giving it more reasoning effort.`
+        `Consider a stronger model or more reasoning effort (the task may be harder than the current setting).`
       : null
 
   return {
@@ -150,10 +157,12 @@ export function closeTurn(state, threshold, now = new Date()) {
       started: true,
       turn: { struggled: false, reason: null, command: null },
       streak,
+      calm,
       log: [...state.log, entry].slice(-LOG_LIMIT),
       pendingWarning: warning,
     },
     warning,
+    notice,
   }
 }
 
@@ -254,10 +263,10 @@ export function warningOutput(warning, hookEventName) {
   }
 }
 
-export function run(event, payload, state, threshold, now = new Date()) {
+export function run(event, payload, state, threshold, now = new Date(), calmThreshold = DEFAULT_CALM) {
   if (event === 'prompt') {
-    const closed = closeTurn(state, threshold, now)
-    return { state: closed.state, stderr: closed.warning, stdout: null }
+    const closed = closeTurn(state, threshold, now, calmThreshold)
+    return { state: closed.state, stderr: closed.warning, stdout: null, notice: closed.notice }
   }
 
   if (event === 'tool' || event === 'failure') {
@@ -391,12 +400,18 @@ function main() {
   debugDump(event, payload)
 
   const path = statePath()
-  const result = run(event, payload, load(path), threshold)
-  result.state = { ...result.state, cwd: process.cwd(), updated: new Date().toISOString(), threshold, session: readSession(payload) }
+  const calmThreshold = Math.max(2, Math.floor(Number(process.env.EFFORT_GUARD_CALM)) || DEFAULT_CALM)
+  const result = run(event, payload, load(path), threshold, new Date(), calmThreshold)
+  result.state = { ...result.state, cwd: process.cwd(), updated: new Date().toISOString(), threshold, calmThreshold, session: readSession(payload) }
   save(path, result.state)
   logEvent(event, payload, result.state)
   if (result.stderr) {
     appendFileSync(join(homeDir(), 'events.log'), `${new Date().toISOString()} WARNING ${result.stderr}\n`)
+  }
+
+  if (result.notice) {
+    // Only logged and shown by the extension: it is not fed to the agent as context.
+    appendFileSync(join(homeDir(), 'events.log'), `${new Date().toISOString()} INFO ${result.notice}\n`)
   }
 
   if (result.stderr) {

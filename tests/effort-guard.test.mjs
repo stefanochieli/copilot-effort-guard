@@ -186,3 +186,18 @@ test('doctor report lists the sessions seen in the log, old log lines still pars
   assert.match(text, /cli\s+t-bbbbcccc\s+a\s+1/)
   assert.match(text, /\?\s+-\s+old\s+1/)
 })
+
+test('a run of clean turns raises one calm notice, a struggling turn resets it', () => {
+  let state = emptyState()
+  const notices = []
+  for (let i = 0; i < 6; i++) {
+    const r = run('prompt', {}, state, 3, new Date(), 3)
+    state = r.state
+    if (r.notice) notices.push(r.notice)
+  }
+  assert.equal(notices.length, 1)
+  assert.match(notices[0], /lighter model/)
+  state = onTool(state, failingTest)
+  state = run('prompt', {}, state, 3, new Date(), 3).state
+  assert.equal(state.calm, 0)
+})

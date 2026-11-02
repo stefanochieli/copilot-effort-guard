@@ -18,10 +18,12 @@ test('computeView: idle, ok, watch and warn levels', () => {
 })
 
 test('shouldNotify fires only when the streak crosses the threshold', () => {
-  assert.equal(lib.shouldNotify({ streak: 2 }, { streak: 3, threshold: 3 }), true)
-  assert.equal(lib.shouldNotify({ streak: 3 }, { streak: 4, threshold: 3 }), false)
-  assert.equal(lib.shouldNotify(null, { streak: 1, threshold: 3 }), false)
-  assert.equal(lib.shouldNotify({ streak: 2 }, null), false)
+  assert.equal(lib.shouldNotify({ streak: 2 }, { streak: 3, threshold: 3 }), 'warn')
+  assert.equal(lib.shouldNotify({ streak: 3 }, { streak: 4, threshold: 3 }), null)
+  assert.equal(lib.shouldNotify(null, { streak: 1, threshold: 3 }), null)
+  assert.equal(lib.shouldNotify({ streak: 2 }, null), null)
+  assert.equal(lib.shouldNotify({ calm: 7 }, { streak: 0, calm: 8, calmThreshold: 8 }), 'calm')
+  assert.equal(lib.shouldNotify({ calm: 8 }, { streak: 0, calm: 9, calmThreshold: 8 }), null)
 })
 
 test('findState matches the workspace folder or a subfolder, case-insensitively on Windows paths, newest first', () => {
@@ -44,4 +46,13 @@ test('readProjects loads state.json files written by the hooks', () => {
   assert.equal(projects[0].state.streak, 2)
   assert.deepEqual(lib.readProjects(join(home, 'missing')), [])
   assert.match(lib.formatReport(projects), /\/w\n  turns 0/)
+})
+
+test('computeView suggests a lighter model after a long clean run, a stronger one when struggling', () => {
+  const calm = lib.computeView({ streak: 0, calm: 8, calmThreshold: 8, turn: {}, log: [] })
+  assert.equal(calm.level, 'calm')
+  assert.match(calm.message, /lighter model/)
+  assert.equal(lib.computeView({ streak: 0, calm: 3, calmThreshold: 8, turn: {}, log: [] }).level, 'ok')
+  const warn = lib.computeView({ streak: 3, threshold: 3, calm: 0, turn: {}, log: [] })
+  assert.match(warn.message, /stronger model/)
 })
