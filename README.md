@@ -29,8 +29,20 @@ npm test
 
 Flusso: i rami di lavoro partono da `develop` e tornano su `develop` con PR (titolo in stile [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `chore:`…); quando la situazione è stabile si mergia la PR `develop` → `main` (merge commit, non squash).
 
-Dopo il merge su `main`, [release-please](https://github.com/googleapis/release-please) legge i commit, calcola la versione (`fix:` → patch, `feat:` → minor, `feat!:` o `BREAKING CHANGE` → major) e apre la PR "chore: release X.Y.Z", che aggiorna `package.json` e `CHANGELOG.md`. Il workflow `release-please.yml` lancia la CI su quella PR; unendola (merge) vengono creati il tag `vX.Y.Z` e la GitHub Release. Non modificare a mano `version` né `CHANGELOG.md`.
+Dopo il merge su `main`, [release-please](https://github.com/googleapis/release-please) legge i commit, calcola la versione (`fix:` → patch, `feat:` → minor, `feat!:` o `BREAKING CHANGE` → major) e apre la PR "chore: release X.Y.Z", che aggiorna `package.json`, `vscode-extension/package.json` (stessa versione) e `CHANGELOG.md`. Il workflow `auto-release.yml` lancia la CI su quella PR; unendola (merge) vengono creati il tag `vX.Y.Z` e la GitHub Release. Non modificare a mano `version` né `CHANGELOG.md`. La configurazione sta in `release-config.json` e `release-manifest.json`. Il nome del ramo della PR di release (`release-please--branches--…`) è fissato dallo strumento e non si può cambiare.
 
 Con il secret `RELEASE_PLEASE_TOKEN` (PAT o GitHub App con `contents` e `pull-requests` in scrittura) la PR di release si unisce da sola quando `checks` è verde (serve **Allow auto-merge** nelle impostazioni del repo) e il tag parte senza passaggi manuali. Senza il secret la PR di release va unita a mano. Settings → Actions → General → Workflow permissions: **Read and write** + **Allow GitHub Actions to create and approve pull requests**.
 
 Dopo il merge della PR di release, riporta `main` su `develop` (PR `main` → `develop`) per non far divergere `package.json` e il changelog.
+
+### Estensione VS Code: pubblicazione
+
+A ogni release il job `publish-extension` costruisce il `.vsix` e lo allega alla GitHub Release. Se nei secret del repo c'è `VSCE_PAT`, lo pubblica anche sul Visual Studio Marketplace (identificativo `stefanochieli.copilot-effort-guard-status`), da cui VS Code lo aggiorna da solo.
+
+Una tantum, a cura del proprietario del repo:
+
+1. Crea il publisher `stefanochieli` su <https://marketplace.visualstudio.com/manage> (serve un account Microsoft; l'ID deve coincidere con `publisher` in `vscode-extension/package.json`).
+2. Crea su <https://dev.azure.com> un Personal Access Token con organizzazione **All accessible organizations** e scope **Marketplace → Manage**.
+3. Salvalo come secret del repo `VSCE_PAT` (Settings → Secrets and variables → Actions).
+
+Alla release successiva l'estensione comparirà sul Marketplace. Senza il secret il job allega solo il `.vsix`.

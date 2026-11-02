@@ -11,6 +11,8 @@ Funziona con la chat agente di VS Code e con la Copilot CLI lanciata nel termina
 
 ## Installazione
 
+Dal Marketplace (dopo la pubblicazione): cerca *Copilot Effort Guard* nelle estensioni oppure `code --install-extension stefanochieli.copilot-effort-guard-status`; si aggiorna da sola. Altrimenti dal `.vsix` allegato a ogni [GitHub Release](https://github.com/stefanochieli/copilot-effort-guard/releases), oppure da sorgente:
+
 Prima installa gli hook (`node scripts/install.mjs --user`, vedi [SETUP](https://github.com/stefanochieli/copilot-effort-guard/blob/main/docs/SETUP.md)). Poi:
 
 ```

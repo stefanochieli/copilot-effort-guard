@@ -10,8 +10,11 @@ concurrency:
   group: release
   cancel-in-progress: false
 jobs:
-  release-please:
+  release:
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     env:
       # Secrets cannot be read in a step's `if`; expose only whether it is set.
       HAS_RELEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN != '' }}
@@ -22,8 +25,8 @@ jobs:
           # Optional: with a PAT or GitHub App token (secret RELEASE_PLEASE_TOKEN)
           # the release PR triggers the normal pull_request workflows by itself.
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
+          config-file: release-config.json
+          manifest-file: release-manifest.json
       # prs_created is true only when a release PR was created or updated.
       # A PR opened or updated with GITHUB_TOKEN does not trigger CI, and the
       # ruleset requires the "checks" status. Dispatch CI on the release branch:
@@ -60,3 +63,36 @@ jobs:
             exit 0
           fi
           gh pr merge "$number" --auto --merge
+
+  # Runs only when a release was just tagged: builds the VS Code extension,
+  # attaches the .vsix to the GitHub Release and, if the secret VSCE_PAT is set,
+  # publishes it to the Visual Studio Marketplace.
+  publish-extension:
+    needs: release
+    if: ${{ needs.release.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.release.outputs.tag_name }}
+      HAS_VSCE_PAT: ${{ secrets.VSCE_PAT != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.tag_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Package the extension
+        working-directory: vscode-extension
+        run: npx --yes @vscode/vsce package --no-dependencies -o "$GITHUB_WORKSPACE/copilot-effort-guard-status.vsix"
+      - name: Attach the .vsix to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" copilot-effort-guard-status.vsix --clobber
+      - name: Publish to the Marketplace
+        if: ${{ env.HAS_VSCE_PAT == 'true' }}
+        working-directory: vscode-extension
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx --yes @vscode/vsce publish --no-dependencies --packagePath "$GITHUB_WORKSPACE/copilot-effort-guard-status.vsix"
