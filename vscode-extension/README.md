@@ -1,6 +1,6 @@
 # Copilot Effort Guard (estensione VS Code)
 
-Voce nella status bar che mostra la serie di turni "faticosi" di Copilot letta dallo stato scritto dagli hook di [copilot-effort-guard](../README.md). Gli hook di Copilot non possono disegnare nulla: l'estensione legge lo stato e lo mostra.
+Voce nella status bar che mostra la serie di turni "faticosi" di Copilot letta dallo stato scritto dagli hook di [copilot-effort-guard](https://github.com/stefanochieli/copilot-effort-guard#readme). Gli hook di Copilot non possono disegnare nulla: l'estensione legge lo stato e lo mostra.
 
 - `effort 1/3`: 1 turno faticoso di fila su una soglia di 3. A soglia raggiunta la voce diventa gialla (`warning`) e compare una notifica.
 - `effort -`: nessun dato per la cartella aperta.
@@ -10,7 +10,7 @@ Funziona con la chat agente di VS Code e con la Copilot CLI lanciata nel termina
 
 ## Installazione
 
-Prima installa gli hook (`node scripts/install.mjs --user`, vedi [SETUP](../docs/SETUP.md)). Poi:
+Prima installa gli hook (`node scripts/install.mjs --user`, vedi [SETUP](https://github.com/stefanochieli/copilot-effort-guard/blob/main/docs/SETUP.md)). Poi:
 
 ```
 cd vscode-extension
