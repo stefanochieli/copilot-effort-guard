@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.3.0...v0.4.0) (2026-11-02)
+
+
+### Features
+
+* sync the extension version with releases and publish it to the Marketplace ([#25](https://github.com/stefanochieli/copilot-effort-guard/issues/25)) ([1f91731](https://github.com/stefanochieli/copilot-effort-guard/commit/1f9173146209cfd5933bdd22dd0b28ee8d716fd2))
+
 ## [0.3.0](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.2.1...v0.3.0) (2026-11-02)
 
 
