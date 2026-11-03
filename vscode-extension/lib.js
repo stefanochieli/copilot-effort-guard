@@ -86,12 +86,10 @@ function computeView(state, fallbackThreshold = 3) {
   if (state.turn?.struggled) {
     lines.push(`Current turn: struggling (${state.turn.reason})`)
   }
-  let hint = null
-  if (level === 'warn') {
-    hint = 'The model seems to be struggling: consider a stronger model or more reasoning effort.'
-  } else if (level === 'calm') {
-    hint = `${calm} clean turns in a row: if the task is simple, a lighter model or less reasoning saves tokens.`
-  }
+  const messages = adviceMessages(streak, threshold, calm)
+  // action: what to do with the model settings right now.
+  const action = level === 'warn' ? (streak >= threshold * 2 ? 'model-up' : 'thinking-up') : level === 'calm' ? 'down' : null
+  const hint = action === 'model-up' ? messages.escalate : action === 'thinking-up' ? messages.warn : action === 'down' ? messages.calm : null
   if (hint) lines.push(hint)
   const icon = level === 'warn' ? 'warning' : level === 'calm' ? 'check' : 'pulse'
   return {
@@ -100,6 +98,8 @@ function computeView(state, fallbackThreshold = 3) {
     text: `$(${icon}) ${textBar(streak, threshold)} ${streak}/${threshold}`,
     tooltip: lines.join('\n'),
     message: hint ? `Effort Guard: ${hint}` : null,
+    messages,
+    action,
     segments: Math.min(Math.max(threshold, 1), 10),
     filled: Math.min(streak, Math.min(Math.max(threshold, 1), 10)),
     streak,
@@ -111,6 +111,17 @@ function computeView(state, fallbackThreshold = 3) {
     session: state.session ?? null,
     cwd: state.cwd ?? null,
     updated: state.updated ?? null,
+  }
+}
+
+const ACTION_BADGE = { 'thinking-up': '\u2191 Raise thinking', 'model-up': '\u2191\u2191 Upgrade model', down: '\u2193 Downgrade' }
+
+// The advice for each situation, in the order the user should try it.
+function adviceMessages(streak, threshold, calm) {
+  return {
+    warn: `${Math.max(streak, threshold)} struggling turns in a row: raise the thinking / reasoning effort, the task may need more deliberation.`,
+    escalate: `${Math.max(streak, threshold * 2)} struggling turns in a row, more thinking did not help: switch to a more powerful model.`,
+    calm: `${calm} clean turns in a row, the task looks easy: downgrade to a lighter model or lower the thinking effort to save tokens.`,
   }
 }
 
@@ -136,6 +147,7 @@ function renderHtml(view, now = Date.now()) {
     ? view.timeline.map(st => `<span class="dot ${st ? 'bad' : 'good'}"></span>`).join('')
     : '<span class="muted">no turns yet</span>'
   const session = view.session ? `${esc(view.session.source)} / ${esc(view.session.id)}` : '-'
+  const badge = view.action ? `<span class="badge">${esc(ACTION_BADGE[view.action])}</span>` : ''
   return `<!doctype html>
 <html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
@@ -145,6 +157,7 @@ function renderHtml(view, now = Date.now()) {
   .level { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
   .level b { font-size: 1.25em; color: var(--c); }
   .count { opacity: .75; }
+  .badge { background: var(--c); color: #0d1117; border-radius: 10px; padding: 1px 8px; font-size: .8em; font-weight: 600; }
   .bar { display: flex; gap: 4px; margin: 6px 0 12px; }
   .seg { flex: 1; height: 14px; border-radius: 3px; background: var(--vscode-input-background, #3338); border: 1px solid var(--vscode-widget-border, #8884); }
   .seg.on { background: var(--c); border-color: var(--c); }
@@ -159,7 +172,7 @@ function renderHtml(view, now = Date.now()) {
   .muted { opacity: .65; font-size: .9em; }
   .meta { margin-top: 12px; line-height: 1.5; }
 </style></head><body>
-<div class="level"><b>${esc(view.label)}</b><span class="count">${view.streak}/${view.threshold} struggling turns in a row</span></div>
+<div class="level"><b>${esc(view.label)}</b>${badge}<span class="count">${view.streak}/${view.threshold} struggling turns in a row</span></div>
 <div class="bar">${segs}</div>
 <h4>Clean run (${view.calm}/${view.calmThreshold})</h4>
 <div class="calm"><i></i></div>
@@ -171,10 +184,11 @@ ${view.hint ? `<div class="hint">${esc(view.hint)}</div>` : ''}
 }
 
 // Which notification to show, if any: 'warn' when the streak has just reached the
-// threshold, 'calm' when the clean run has just reached the calm threshold.
+// threshold, 'escalate' at twice the threshold, 'calm' at the calm threshold.
 function shouldNotify(prev, cur, fallbackThreshold = 3) {
   if (!cur) return null
   const threshold = cur.threshold || fallbackThreshold
+  if ((cur.streak || 0) >= threshold * 2 && (prev?.streak || 0) < threshold * 2) return 'escalate'
   if ((cur.streak || 0) >= threshold && (prev?.streak || 0) < threshold) return 'warn'
   const calmThreshold = cur.calmThreshold || 8
   if ((cur.calm || 0) >= calmThreshold && (prev?.calm || 0) < calmThreshold) return 'calm'

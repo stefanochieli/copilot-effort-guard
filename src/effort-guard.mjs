@@ -142,15 +142,17 @@ export function closeTurn(state, threshold, now = new Date(), calmThreshold = DE
   const calm = struggled ? 0 : (state.calm ?? 0) + 1
   const notice =
     calm === calmThreshold
-      ? `effort-guard: ${calm} clean turns in a row. If the task is simple, a lighter model or less reasoning effort would save tokens.`
+      ? `effort-guard: ${calm} clean turns in a row. The task looks easy: downgrade to a lighter model or lower the thinking effort to save tokens.`
       : null
   const entry = { ts: now.toISOString(), struggled, reason, streak }
+  // Two steps: first more thinking, then (if the streak keeps growing) a stronger model.
+  const where = `${streak} struggling turns in a row (failed commands/tests)${command ? `, last: ${command.slice(0, 60)}` : ''}.`
   const warning =
     streak === threshold
-      ? `effort-guard: ${streak} struggling turns in a row (failed commands/tests)` +
-        `${command ? `, last: ${command.slice(0, 60)}` : ''}. ` +
-        `Consider a stronger model or more reasoning effort (the task may be harder than the current setting).`
-      : null
+      ? `effort-guard: ${where} Raise the thinking / reasoning effort: the task may need more deliberation.`
+      : struggled && streak === threshold * 2
+        ? `effort-guard: ${where} More thinking did not help: switch to a more powerful model.`
+        : null
 
   return {
     state: {
