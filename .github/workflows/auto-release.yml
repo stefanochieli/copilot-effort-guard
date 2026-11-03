@@ -77,10 +77,10 @@ jobs:
       TAG: ${{ needs.release.outputs.tag_name }}
       HAS_VSCE_PAT: ${{ secrets.VSCE_PAT != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.release.outputs.tag_name }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Package the extension
