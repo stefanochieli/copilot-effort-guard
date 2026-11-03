@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.5.0...v0.6.0) (2026-11-03)
+
+
+### Features
+
+* tell the user to raise the thinking, upgrade the model or downgrade ([#33](https://github.com/stefanochieli/copilot-effort-guard/issues/33)) ([de8474b](https://github.com/stefanochieli/copilot-effort-guard/commit/de8474b37194f36b57f2a5da761dd26fd042b6b0))
+
+
+### Bug Fixes
+
+* add a proper icon to the VS Code extension ([#31](https://github.com/stefanochieli/copilot-effort-guard/issues/31)) ([2fd60b4](https://github.com/stefanochieli/copilot-effort-guard/commit/2fd60b4eba155b42aae1929eeb07b73295f63fab))
+
 ## [0.5.0](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.4.0...v0.5.0) (2026-11-03)
 
 
