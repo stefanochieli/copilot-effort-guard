@@ -210,8 +210,9 @@ test('terminal bar: segments, level and optional colour', () => {
   assert.equal(levelOf({ streak: 3, threshold: 3 }), 'warn')
   assert.equal(levelOf({ streak: 0, calm: 8, calmThreshold: 8 }), 'calm')
   assert.equal(renderBar({ streak: 2, threshold: 3 }), 'effort [■■□] 2/3 WATCH')
-  assert.match(renderBar({ streak: 3, threshold: 3 }), /STRUGGLING.*stronger model/)
-  assert.match(renderBar({ streak: 0, calm: 9, calmThreshold: 8 }), /SMOOTH.*lighter model/)
+  assert.match(renderBar({ streak: 3, threshold: 3 }), /STRUGGLING.*RAISE the thinking/)
+  assert.match(renderBar({ streak: 6, threshold: 3 }), /STRUGGLING.*UPGRADE the model/)
+  assert.match(renderBar({ streak: 0, calm: 9, calmThreshold: 8 }), /SMOOTH.*DOWNGRADE/)
   assert.ok(renderBar({ streak: 3, threshold: 3 }, { color: true }).includes('\x1b[31m'))
   assert.ok(!renderBar({ streak: 3, threshold: 3 }).includes('\x1b['))
 })
@@ -221,4 +222,17 @@ test('status prints the bar line', () => {
   const env = { ...process.env, EFFORT_GUARD_DIR: dir }
   const out = execFileSync('node', ['src/effort-guard.mjs', 'status'], { input: '{}', env, encoding: 'utf8' })
   assert.match(out, /^effort \[.*\] 0\/3 OK/)
+})
+
+test('struggling advice has two steps: more thinking at the threshold, a stronger model at twice the threshold', () => {
+  let state = emptyState()
+  const warnings = []
+  for (let i = 0; i < 8; i++) {
+    const c = closeTurn(state, 3)
+    state = onTool(c.state, failingTest)
+    if (c.warning) warnings.push(c.warning)
+  }
+  assert.equal(warnings.length, 2)
+  assert.match(warnings[0], /Raise the thinking/)
+  assert.match(warnings[1], /switch to a more powerful model/)
 })

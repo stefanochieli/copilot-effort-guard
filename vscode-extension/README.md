@@ -2,9 +2,9 @@
 
 Voce nella status bar che mostra la serie di turni "faticosi" di Copilot letta dallo stato scritto dagli hook di [copilot-effort-guard](https://github.com/stefanochieli/copilot-effort-guard#readme). Gli hook di Copilot non possono disegnare nulla: l'estensione legge lo stato e lo mostra.
 
-- `▰▱▱ 1/3`: barra a segmenti, 1 turno faticoso di fila su una soglia di 3. Il colore cambia con lo stato: verde (ok), blu (molti turni puliti), sfondo giallo (qualche fatica), sfondo rosso a soglia raggiunta, con una notifica che suggerisce un modello più potente o più reasoning.
-- **Pannello laterale** (icona *Effort Guard* nell'Activity Bar, o clic sulla voce di stato): barra grande colorata, avanzamento verso la serie di turni puliti, cronologia colorata degli ultimi turni (verde pulito, rosso faticoso), suggerimento e sessione.
-- Icona con la spunta (`✓ effort 0/3`) dopo molti turni puliti di fila (default 8, `EFFORT_GUARD_CALM`): il task sembra semplice, la notifica suggerisce un modello più leggero o meno reasoning per risparmiare token.
+- `▰▱▱ 1/3`: barra a segmenti, 1 turno faticoso di fila su una soglia di 3. Il colore cambia con lo stato: verde (ok), blu (molti turni puliti), sfondo giallo (qualche fatica), sfondo rosso a soglia raggiunta, con una notifica che dice cosa fare, in due passi: a soglia raggiunta *alza il thinking / reasoning*; se i turni faticosi continuano fino al doppio della soglia, *passa a un modello più potente*.
+- **Pannello laterale** (icona *Effort Guard* nell'Activity Bar, o clic sulla voce di stato): barra grande colorata, avanzamento verso la serie di turni puliti, cronologia colorata degli ultimi turni (verde pulito, rosso faticoso), suggerimento e sessione. Un'etichetta indica l'azione: *↑ Raise thinking*, *↑↑ Upgrade model*, *↓ Downgrade*.
+- Icona con la spunta (`✓ effort 0/3`) dopo molti turni puliti di fila (default 8, `EFFORT_GUARD_CALM`): il task sembra semplice, la notifica dice di *scendere* a un modello più leggero o meno reasoning per risparmiare token.
 - `effort -`: nessun dato per la cartella aperta.
 - Comando *Effort Guard: Show report*: riepilogo di tutti i progetti nel pannello *Output → Effort Guard*.
 

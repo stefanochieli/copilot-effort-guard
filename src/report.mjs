@@ -168,9 +168,9 @@ export function renderBar(info, { color = false } = {}) {
   const bar = '\u25A0'.repeat(filled) + '\u25A1'.repeat(segments - filled)
   let line = `effort ${paint(`[${bar}]`)} ${info.streak ?? 0}/${threshold} ${paint(LABEL[level])}`
   if (level === 'warn') {
-    line += '  consider a stronger model or more reasoning'
+    line += (info.streak ?? 0) >= threshold * 2 ? '  UPGRADE the model' : '  RAISE the thinking effort'
   } else if (level === 'calm') {
-    line += `  ${info.calm} clean turns: a lighter model may be enough`
+    line += `  ${info.calm} clean turns: DOWNGRADE to a lighter model or less thinking`
   }
   return line
 }
