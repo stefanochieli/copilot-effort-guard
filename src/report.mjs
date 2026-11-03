@@ -148,3 +148,29 @@ export function formatDoctor(info, now = new Date()) {
 
   return out.join('\n') + '\n'
 }
+
+const ANSI = { ok: '32', calm: '34', watch: '33', warn: '31' }
+const LABEL = { ok: 'OK', calm: 'SMOOTH', watch: 'WATCH', warn: 'STRUGGLING' }
+
+export function levelOf({ streak = 0, threshold = 3, calm = 0, calmThreshold = 8, struggling = false } = {}) {
+  if (streak >= threshold) return 'warn'
+  if (streak > 0 || struggling) return 'watch'
+  return calm >= calmThreshold ? 'calm' : 'ok'
+}
+
+// One-line coloured bar for the terminal: "effort [##-] 2/3 WATCH". Colour only on request.
+export function renderBar(info, { color = false } = {}) {
+  const threshold = Math.max(1, info.threshold ?? 3)
+  const segments = Math.min(threshold, 10)
+  const filled = Math.min(info.streak ?? 0, segments)
+  const level = levelOf({ ...info, threshold })
+  const paint = text => (color ? `\x1b[${ANSI[level]}m${text}\x1b[0m` : text)
+  const bar = '\u25A0'.repeat(filled) + '\u25A1'.repeat(segments - filled)
+  let line = `effort ${paint(`[${bar}]`)} ${info.streak ?? 0}/${threshold} ${paint(LABEL[level])}`
+  if (level === 'warn') {
+    line += '  consider a stronger model or more reasoning'
+  } else if (level === 'calm') {
+    line += `  ${info.calm} clean turns: a lighter model may be enough`
+  }
+  return line
+}

@@ -45,16 +45,38 @@ function findState(projects, folders) {
   return matches[0] ?? null
 }
 
+const LEVEL_LABEL = { idle: 'No data yet', ok: 'All good', calm: 'Very smooth', watch: 'Some struggle', warn: 'Struggling' }
+// Theme colour ids (work in light and dark themes) and a hex fallback for the webview.
+const LEVEL_THEME_COLOR = { ok: 'testing.iconPassed', calm: 'charts.blue', watch: 'editorWarning.foreground', warn: 'editorError.foreground' }
+const LEVEL_HEX = { idle: '#8b949e', ok: '#3fb950', calm: '#58a6ff', watch: '#d29922', warn: '#f85149' }
+
+function levelOf(state, fallbackThreshold = 3) {
+  if (!state) return 'idle'
+  const threshold = state.threshold || fallbackThreshold
+  const streak = state.streak || 0
+  const calmThreshold = state.calmThreshold || 8
+  if (streak >= threshold) return 'warn'
+  if (streak > 0 || state.turn?.struggled) return 'watch'
+  return (state.calm || 0) >= calmThreshold ? 'calm' : 'ok'
+}
+
+// Text bar for the status bar: one segment per allowed struggling turn (max 10).
+function textBar(streak, threshold) {
+  const segments = Math.min(Math.max(threshold, 1), 10)
+  const filled = Math.min(streak, segments)
+  return '\u25B0'.repeat(filled) + '\u25B1'.repeat(segments - filled)
+}
+
 // level: idle (no data), ok, calm (long clean run: task may be easy), watch (some struggle), warn (threshold reached).
 function computeView(state, fallbackThreshold = 3) {
   if (!state) {
-    return { level: 'idle', text: '$(pulse) effort -', tooltip: 'Effort Guard: no data for this folder yet. Use Copilot agent mode or the CLI here.' }
+    return { level: 'idle', label: LEVEL_LABEL.idle, text: '$(pulse) effort -', tooltip: 'Effort Guard: no data for this folder yet. Use Copilot agent mode or the CLI here.', segments: fallbackThreshold, filled: 0, streak: 0, threshold: fallbackThreshold, calm: 0, calmThreshold: 8, timeline: [], hint: null }
   }
   const threshold = state.threshold || fallbackThreshold
   const streak = state.streak || 0
   const calm = state.calm || 0
   const calmThreshold = state.calmThreshold || 8
-  const level = streak >= threshold ? 'warn' : streak > 0 || state.turn?.struggled ? 'watch' : calm >= calmThreshold ? 'calm' : 'ok'
+  const level = levelOf(state, fallbackThreshold)
   const log = state.log ?? []
   const struggled = log.filter(e => e.struggled).length
   const lines = [
@@ -64,14 +86,88 @@ function computeView(state, fallbackThreshold = 3) {
   if (state.turn?.struggled) {
     lines.push(`Current turn: struggling (${state.turn.reason})`)
   }
+  let hint = null
   if (level === 'warn') {
-    lines.push('Struggling: consider a stronger model or more reasoning effort.')
+    hint = 'The model seems to be struggling: consider a stronger model or more reasoning effort.'
+  } else if (level === 'calm') {
+    hint = `${calm} clean turns in a row: if the task is simple, a lighter model or less reasoning saves tokens.`
   }
-  if (level === 'calm') {
-    lines.push(`${calm} clean turns in a row: if the task is simple, a lighter model or less reasoning saves tokens.`)
-  }
+  if (hint) lines.push(hint)
   const icon = level === 'warn' ? 'warning' : level === 'calm' ? 'check' : 'pulse'
-  return { level, text: `$(${icon}) effort ${streak}/${threshold}`, tooltip: lines.join('\n'), message: level === 'warn' ? 'Effort Guard: the model seems to be struggling. Consider a stronger model or more reasoning effort.' : level === 'calm' ? `Effort Guard: ${calm} clean turns in a row. If the task is simple, a lighter model or less reasoning saves tokens.` : null }
+  return {
+    level,
+    label: LEVEL_LABEL[level],
+    text: `$(${icon}) ${textBar(streak, threshold)} ${streak}/${threshold}`,
+    tooltip: lines.join('\n'),
+    message: hint ? `Effort Guard: ${hint}` : null,
+    segments: Math.min(Math.max(threshold, 1), 10),
+    filled: Math.min(streak, Math.min(Math.max(threshold, 1), 10)),
+    streak,
+    threshold,
+    calm,
+    calmThreshold,
+    timeline: log.slice(-24).map(e => Boolean(e.struggled)),
+    hint,
+    session: state.session ?? null,
+    cwd: state.cwd ?? null,
+    updated: state.updated ?? null,
+  }
+}
+
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+}
+
+function ageText(iso, now = Date.now()) {
+  if (!iso) return '-'
+  const s = Math.max(0, Math.round((now - new Date(iso)) / 1000))
+  if (Number.isNaN(s)) return '-'
+  if (s < 60) return `${s}s ago`
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`
+  return `${Math.floor(s / 86400)} d ago`
+}
+
+// HTML of the side panel: a segmented bar that changes colour with the model's effort level.
+function renderHtml(view, now = Date.now()) {
+  const color = LEVEL_HEX[view.level]
+  const segs = Array.from({ length: view.segments }, (_, i) => `<span class="seg${i < view.filled ? ' on' : ''}"></span>`).join('')
+  const dots = view.timeline.length
+    ? view.timeline.map(st => `<span class="dot ${st ? 'bad' : 'good'}"></span>`).join('')
+    : '<span class="muted">no turns yet</span>'
+  const session = view.session ? `${esc(view.session.source)} / ${esc(view.session.id)}` : '-'
+  return `<!doctype html>
+<html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
+<style>
+  :root { --c: ${color}; }
+  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 10px 12px; }
+  .level { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+  .level b { font-size: 1.25em; color: var(--c); }
+  .count { opacity: .75; }
+  .bar { display: flex; gap: 4px; margin: 6px 0 12px; }
+  .seg { flex: 1; height: 14px; border-radius: 3px; background: var(--vscode-input-background, #3338); border: 1px solid var(--vscode-widget-border, #8884); }
+  .seg.on { background: var(--c); border-color: var(--c); }
+  .calm { height: 6px; border-radius: 3px; background: var(--vscode-input-background, #3338); margin: 2px 0 12px; overflow: hidden; }
+  .calm i { display: block; height: 100%; width: ${Math.min(100, Math.round((view.calm / Math.max(view.calmThreshold, 1)) * 100))}%; background: ${LEVEL_HEX.calm}; }
+  h4 { margin: 12px 0 4px; font-weight: 600; opacity: .8; text-transform: uppercase; font-size: .75em; letter-spacing: .04em; }
+  .timeline { display: flex; flex-wrap: wrap; gap: 3px; }
+  .dot { width: 10px; height: 10px; border-radius: 2px; }
+  .dot.good { background: ${LEVEL_HEX.ok}; }
+  .dot.bad { background: ${LEVEL_HEX.warn}; }
+  .hint { margin-top: 12px; padding: 8px; border-left: 3px solid var(--c); background: var(--vscode-textBlockQuote-background, #8881); }
+  .muted { opacity: .65; font-size: .9em; }
+  .meta { margin-top: 12px; line-height: 1.5; }
+</style></head><body>
+<div class="level"><b>${esc(view.label)}</b><span class="count">${view.streak}/${view.threshold} struggling turns in a row</span></div>
+<div class="bar">${segs}</div>
+<h4>Clean run (${view.calm}/${view.calmThreshold})</h4>
+<div class="calm"><i></i></div>
+<h4>Last turns</h4>
+<div class="timeline">${dots}</div>
+${view.hint ? `<div class="hint">${esc(view.hint)}</div>` : ''}
+<div class="meta muted">Session: ${session}<br>Folder: ${esc(view.cwd ?? '-')}<br>Last activity: ${esc(ageText(view.updated, now))}</div>
+</body></html>`
 }
 
 // Which notification to show, if any: 'warn' when the streak has just reached the
@@ -98,4 +194,4 @@ function formatReport(projects, now = Date.now()) {
     .join('\n\n')
 }
 
-module.exports = { copilotHome, readProjects, findState, computeView, shouldNotify, formatReport, isInside }
+module.exports = { copilotHome, readProjects, findState, computeView, levelOf, textBar, renderHtml, shouldNotify, formatReport, isInside, LEVEL_THEME_COLOR, LEVEL_HEX }
