@@ -31,6 +31,10 @@
       {
         "command": "effortGuard.showReport",
         "title": "Effort Guard: Show report"
+      },
+      {
+        "command": "effortGuard.reset",
+        "title": "Effort Guard: Reset after changing model or thinking"
       }
     ],
     "configuration": {

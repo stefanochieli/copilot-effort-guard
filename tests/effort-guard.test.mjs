@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { emptyState, onTool, closeTurn, summary, readTool } from '../src/effort-guard.mjs'
+import { emptyState, onTool, closeTurn, summary, readTool, resetState, touchSession } from '../src/effort-guard.mjs'
 
 const failingTest = { toolName: 'bash', toolArgs: { command: 'npm test' }, toolResult: { textResultForLlm: '2 failing' } }
 
@@ -235,4 +235,18 @@ test('struggling advice has two steps: more thinking at the threshold, a stronge
   assert.equal(warnings.length, 2)
   assert.match(warnings[0], /Raise the thinking/)
   assert.match(warnings[1], /switch to a more powerful model/)
+})
+
+test('resetState clears streaks but keeps the log; touchSession keeps the latest sessions first', () => {
+  const state = { ...emptyState(), streak: 3, calm: 9, log: [{ struggled: true }], pendingWarning: 'x', turn: { struggled: true, reason: 'tool_error', command: null } }
+  const r = resetState(state)
+  assert.equal(r.streak, 0)
+  assert.equal(r.calm, 0)
+  assert.equal(r.pendingWarning, null)
+  assert.equal(r.turn.struggled, false)
+  assert.equal(r.log.length, 1)
+  let list = touchSession(undefined, { source: 'cli', id: 'a' })
+  list = touchSession(list, { source: 'vscode-chat', id: 'b' })
+  list = touchSession(list, { source: 'cli', id: 'a' })
+  assert.deepEqual(list.map(x => x.id), ['a', 'b'])
 })

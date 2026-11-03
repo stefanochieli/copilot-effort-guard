@@ -7,6 +7,7 @@ let timer
 let previous = null
 let panel = null
 let lastHtml = ''
+let currentDir = null
 
 function settings() {
   const cfg = vscode.workspace.getConfiguration('effortGuard')
@@ -18,6 +19,7 @@ function refresh() {
   const folders = (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath)
   const found = lib.findState(lib.readProjects(home), folders)
   const state = found?.state ?? null
+  currentDir = found?.dir ?? null
   const view = lib.computeView(state, threshold)
 
   item.text = view.text
@@ -44,6 +46,21 @@ function refresh() {
   previous = state
 }
 
+function resetEvaluation() {
+  if (!currentDir) {
+    vscode.window.showInformationMessage('Effort Guard: no data for this folder yet, nothing to reset.')
+    return
+  }
+  try {
+    lib.resetProject(currentDir)
+    previous = null
+    refresh()
+    vscode.window.showInformationMessage('Effort Guard: evaluation restarted.')
+  } catch (err) {
+    vscode.window.showErrorMessage(`Effort Guard: reset failed (${err.message})`)
+  }
+}
+
 function activate(context) {
   item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100)
   item.command = 'workbench.view.extension.effortGuard'
@@ -56,6 +73,8 @@ function activate(context) {
     vscode.window.registerWebviewViewProvider('effortGuard.panel', {
       resolveWebviewView(view) {
         panel = view
+        view.webview.options = { enableScripts: true }
+        view.webview.onDidReceiveMessage(m => m?.type === 'reset' && resetEvaluation())
         lastHtml = ''
         view.onDidDispose(() => {
           panel = null
@@ -63,6 +82,7 @@ function activate(context) {
         refresh()
       },
     }),
+    vscode.commands.registerCommand('effortGuard.reset', resetEvaluation),
     vscode.commands.registerCommand('effortGuard.showReport', () => {
       channel.clear()
       channel.appendLine(lib.formatReport(lib.readProjects(settings().home)))

@@ -13,7 +13,7 @@ Hook per **GitHub Copilot** (Copilot CLI e agent hooks di VS Code) che osserva i
 
 Documentazione: [setup](docs/SETUP.md), [funzionamento](docs/FUNZIONAMENTO.md), [prove sul tuo Copilot](TESTING.md). In breve: `node scripts/install.mjs --user` (globale, CLI e VS Code) oppure `node scripts/install.mjs <repo>` (team).
 
-Barra nella status bar di VS Code: estensione in [`vscode-extension/`](vscode-extension/README.md). Comandi: `summary`, `doctor` (report leggibile: setup, ultime chiamate, avvisi, tabella dei progetti), `selftest` (verifica locale senza Copilot). Opzioni via ambiente: `EFFORT_GUARD_THRESHOLD`, `EFFORT_GUARD_DIR`, `EFFORT_GUARD_DEBUG=1` (salva i payload grezzi).
+Barra nella status bar di VS Code: estensione in [`vscode-extension/`](vscode-extension/README.md). Comandi: `summary`, `doctor` (report leggibile: setup, ultime chiamate, avvisi, tabella dei progetti), `selftest` (verifica locale senza Copilot), `reset` (azzera le serie dopo aver cambiato modello o thinking; nell'estensione c'è il pulsante *Reset* nel pannello e il comando *Effort Guard: Reset…*). Opzioni via ambiente: `EFFORT_GUARD_THRESHOLD`, `EFFORT_GUARD_DIR`, `EFFORT_GUARD_DEBUG=1` (salva i payload grezzi).
 
 ## Limiti
 
