@@ -4,6 +4,11 @@
   "description": "Status bar and side panel for copilot-effort-guard: a colour bar showing how hard the Copilot model is struggling.",
   "version": "0.5.0",
   "publisher": "stefanochieli",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#1f2430",
+    "theme": "dark"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
