@@ -201,3 +201,24 @@ test('a run of clean turns raises one calm notice, a struggling turn resets it',
   state = run('prompt', {}, state, 3, new Date(), 3).state
   assert.equal(state.calm, 0)
 })
+
+import { renderBar, levelOf } from '../src/report.mjs'
+
+test('terminal bar: segments, level and optional colour', () => {
+  assert.equal(levelOf({ streak: 0, threshold: 3 }), 'ok')
+  assert.equal(levelOf({ streak: 1, threshold: 3 }), 'watch')
+  assert.equal(levelOf({ streak: 3, threshold: 3 }), 'warn')
+  assert.equal(levelOf({ streak: 0, calm: 8, calmThreshold: 8 }), 'calm')
+  assert.equal(renderBar({ streak: 2, threshold: 3 }), 'effort [■■□] 2/3 WATCH')
+  assert.match(renderBar({ streak: 3, threshold: 3 }), /STRUGGLING.*stronger model/)
+  assert.match(renderBar({ streak: 0, calm: 9, calmThreshold: 8 }), /SMOOTH.*lighter model/)
+  assert.ok(renderBar({ streak: 3, threshold: 3 }, { color: true }).includes('\x1b[31m'))
+  assert.ok(!renderBar({ streak: 3, threshold: 3 }).includes('\x1b['))
+})
+
+test('status prints the bar line', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'eg-'))
+  const env = { ...process.env, EFFORT_GUARD_DIR: dir }
+  const out = execFileSync('node', ['src/effort-guard.mjs', 'status'], { input: '{}', env, encoding: 'utf8' })
+  assert.match(out, /^effort \[.*\] 0\/3 OK/)
+})

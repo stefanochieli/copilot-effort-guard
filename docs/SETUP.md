@@ -60,8 +60,8 @@ Copilot non permette a un hook di disegnare una barra o una notifica, quindi non
 
 ```
 node ~/.copilot/effort-guard/effort-guard.mjs doctor   # file hook trovato, ultime chiamate, stato di ogni progetto
-node ~/.copilot/effort-guard/effort-guard.mjs status   # stato della cartella corrente in una riga
-node ~/.copilot/effort-guard/effort-guard.mjs watch    # vista live in un secondo terminale
+node ~/.copilot/effort-guard/effort-guard.mjs status   # barra colorata + stato della cartella corrente
+node ~/.copilot/effort-guard/effort-guard.mjs watch    # barra colorata live + eventi, da tenere in un secondo terminale (la Copilot CLI non lascia disegnare dentro la sua finestra)
 ```
 
 Ogni chiamata di un hook aggiunge una riga a `~/.copilot/effort-guard/events.log` (ora, evento, nome del tool, cartella; mai il contenuto), e anche gli avvisi (`WARNING`) finiscono lì. `doctor` mostra tutti i progetti, non solo la cartella da cui lo lanci: lo stato è per directory di lavoro, quindi lanciato dal repo di effort-guard non vede la tua sessione su un altro progetto.
@@ -72,7 +72,7 @@ Ogni chiamata di un hook aggiunge una riga a `~/.copilot/effort-guard/events.log
 
 ## Indicatore nella status bar di VS Code
 
-Per avere un indicatore sempre visibile (`effort 1/3`, giallo alla soglia, con notifica) c'è l'estensione in [`vscode-extension/`](../vscode-extension/README.md): legge lo stato scritto dagli hook, quindi copre sia la chat agente sia la Copilot CLI nel terminale di VS Code. Va installata dopo gli hook.
+Per avere un indicatore sempre visibile (barra `▰▱▱ 1/3` che cambia colore, pannello laterale con barra grande e cronologia dei turni, notifica alla soglia) c'è l'estensione in [`vscode-extension/`](../vscode-extension/README.md): legge lo stato scritto dagli hook, quindi copre sia la chat agente sia la Copilot CLI nel terminale di VS Code. Va installata dopo gli hook.
 
 ## Problemi comuni
 

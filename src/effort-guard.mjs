@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { looksLikeTestFailure } from './detect.mjs'
-import { formatDoctor } from './report.mjs'
+import { formatDoctor, renderBar } from './report.mjs'
 
 const DEFAULT_THRESHOLD = 3
 const DEFAULT_CALM = 8
@@ -353,16 +353,36 @@ function doctor() {
   )
 }
 
+function barInfo(s) {
+  return {
+    streak: s.streak ?? 0,
+    threshold: s.threshold || Math.max(1, Math.floor(Number(process.env.EFFORT_GUARD_THRESHOLD)) || DEFAULT_THRESHOLD),
+    calm: s.calm ?? 0,
+    calmThreshold: s.calmThreshold || DEFAULT_CALM,
+    struggling: Boolean(s.turn?.struggled),
+  }
+}
+
+const useColor = () => Boolean(process.stdout.isTTY) && !process.env.NO_COLOR
+
 function status() {
   const s = load(statePath())
-  console.log(`${summary(s)} | streak ${s.streak}/${Math.max(1, Math.floor(Number(process.env.EFFORT_GUARD_THRESHOLD)) || DEFAULT_THRESHOLD)} | current turn ${s.turn.struggled ? `struggling (${s.turn.reason})` : 'ok'}`)
+  console.log(renderBar(barInfo(s), { color: useColor() }))
+  console.log(`${summary(s)} | current turn ${s.turn.struggled ? `struggling (${s.turn.reason})` : 'ok'}`)
 }
 
 // Live view for a second terminal: Copilot has no status bar a hook can draw on.
+// Prints the coloured bar whenever it changes, plus the new events.log lines.
 function watch() {
   let last = null
+  let lastBar = null
   console.log('effort-guard watch (Ctrl+C to stop)')
   setInterval(() => {
+    const bar = renderBar(barInfo(load(statePath())), { color: useColor() })
+    if (bar !== lastBar) {
+      console.log(bar)
+      lastBar = bar
+    }
     const lines = lastEvents(500)
     const fresh = last === null ? lines.slice(-5) : lines.slice(lines.lastIndexOf(last) + 1)
     for (const l of fresh) {
