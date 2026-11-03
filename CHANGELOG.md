@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.6.0...v0.7.0) (2026-11-03)
+
+
+### Features
+
+* reset after changing model/thinking and list sessions in the panel ([#36](https://github.com/stefanochieli/copilot-effort-guard/issues/36)) ([4391659](https://github.com/stefanochieli/copilot-effort-guard/commit/4391659f26c47c2225dd4fbb51f794cb0a080452))
+
 ## [0.6.0](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.5.0...v0.6.0) (2026-11-03)
 
 

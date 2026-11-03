@@ -2,7 +2,7 @@
   "name": "copilot-effort-guard-status",
   "displayName": "Copilot Effort Guard",
   "description": "Status bar and side panel for copilot-effort-guard: a colour bar showing how hard the Copilot model is struggling.",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "publisher": "stefanochieli",
   "icon": "media/icon.png",
   "galleryBanner": {
