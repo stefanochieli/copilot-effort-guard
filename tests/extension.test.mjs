@@ -13,7 +13,12 @@ test('computeView: idle, ok, watch and warn levels', () => {
   assert.equal(lib.computeView({ streak: 1, threshold: 3, turn: {}, log: [] }).text, '$(pulse) \u25B0\u25B1\u25B1 1/3')
   const warn = lib.computeView({ streak: 3, threshold: 3, turn: {}, log: [] })
   assert.equal(warn.level, 'warn')
-  assert.match(warn.tooltip, /stronger model/)
+  assert.match(warn.tooltip, /raise the thinking/)
+  assert.equal(warn.action, 'thinking-up')
+  const esc = lib.computeView({ streak: 6, threshold: 3, turn: {}, log: [] })
+  assert.equal(esc.action, 'model-up')
+  assert.match(esc.message, /more powerful model/)
+  assert.match(lib.renderHtml(esc), /Upgrade model/)
   assert.equal(lib.computeView({ streak: 0, turn: { struggled: true, reason: 'tool_error' }, log: [] }).level, 'watch')
 })
 
@@ -51,10 +56,11 @@ test('readProjects loads state.json files written by the hooks', () => {
 test('computeView suggests a lighter model after a long clean run, a stronger one when struggling', () => {
   const calm = lib.computeView({ streak: 0, calm: 8, calmThreshold: 8, turn: {}, log: [] })
   assert.equal(calm.level, 'calm')
-  assert.match(calm.message, /lighter model/)
+  assert.match(calm.message, /downgrade to a lighter model/)
+  assert.equal(calm.action, 'down')
   assert.equal(lib.computeView({ streak: 0, calm: 3, calmThreshold: 8, turn: {}, log: [] }).level, 'ok')
   const warn = lib.computeView({ streak: 3, threshold: 3, calm: 0, turn: {}, log: [] })
-  assert.match(warn.message, /stronger model/)
+  assert.match(warn.message, /raise the thinking/)
 })
 
 test('side panel html: segments follow the streak, colour follows the level, text is escaped', () => {
@@ -68,4 +74,9 @@ test('side panel html: segments follow the streak, colour follows the level, tex
   assert.match(html, /cli \/ &lt;x&gt;/)
   assert.match(lib.renderHtml(lib.computeView({ streak: 3, threshold: 3, turn: {}, log: [] })), /--c: #f85149/)
   assert.match(lib.renderHtml(lib.computeView(null)), /No data yet/)
+})
+
+test('shouldNotify escalates at twice the threshold', () => {
+  assert.equal(lib.shouldNotify({ streak: 5 }, { streak: 6, threshold: 3 }), 'escalate')
+  assert.equal(lib.shouldNotify({ streak: 6 }, { streak: 7, threshold: 3 }), null)
 })

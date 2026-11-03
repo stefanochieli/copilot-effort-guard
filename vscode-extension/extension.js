@@ -36,10 +36,10 @@ function refresh() {
   }
 
   const kind = notify ? lib.shouldNotify(previous, state, threshold) : null
-  if (kind === 'warn') {
-    vscode.window.showWarningMessage(view.message)
+  if (kind === 'warn' || kind === 'escalate') {
+    vscode.window.showWarningMessage(`Effort Guard: ${view.messages[kind]}`)
   } else if (kind === 'calm') {
-    vscode.window.showInformationMessage(view.message)
+    vscode.window.showInformationMessage(`Effort Guard: ${view.messages.calm}`)
   }
   previous = state
 }

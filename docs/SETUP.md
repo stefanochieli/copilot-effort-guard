@@ -72,7 +72,7 @@ Ogni chiamata di un hook aggiunge una riga a `~/.copilot/effort-guard/events.log
 
 ## Indicatore nella status bar di VS Code
 
-Per avere un indicatore sempre visibile (barra `▰▱▱ 1/3` che cambia colore, pannello laterale con barra grande e cronologia dei turni, notifica alla soglia) c'è l'estensione in [`vscode-extension/`](../vscode-extension/README.md): legge lo stato scritto dagli hook, quindi copre sia la chat agente sia la Copilot CLI nel terminale di VS Code. Va installata dopo gli hook.
+Per avere un indicatore sempre visibile (barra `▰▱▱ 1/3` che cambia colore, pannello laterale con barra grande e cronologia dei turni, notifica alla soglia che dice se alzare il thinking, passare a un modello più forte o scendere se il task è facile) c'è l'estensione in [`vscode-extension/`](../vscode-extension/README.md): legge lo stato scritto dagli hook, quindi copre sia la chat agente sia la Copilot CLI nel terminale di VS Code. Va installata dopo gli hook.
 
 ## Problemi comuni
 
