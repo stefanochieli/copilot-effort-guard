@@ -1,7 +1,7 @@
 {
   "name": "copilot-effort-guard-status",
   "displayName": "Copilot Effort Guard",
-  "description": "Status bar indicator for copilot-effort-guard: shows how many struggling Copilot turns in a row.",
+  "description": "Status bar and side panel for copilot-effort-guard: a colour bar showing how hard the Copilot model is struggling.",
   "version": "0.4.0",
   "publisher": "stefanochieli",
   "license": "MIT",
@@ -48,6 +48,24 @@
           "description": "Show a notification when the warning threshold is reached."
         }
       }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "effortGuard",
+          "title": "Effort Guard",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "effortGuard": [
+        {
+          "type": "webview",
+          "id": "effortGuard.panel",
+          "name": "Effort"
+        }
+      ]
     }
   }
 }
