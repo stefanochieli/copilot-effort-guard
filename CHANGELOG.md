@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.4.0...v0.5.0) (2026-11-03)
+
+
+### Features
+
+* colour bar in the VS Code extension and in the CLI status/watch ([#28](https://github.com/stefanochieli/copilot-effort-guard/issues/28)) ([74e8a2e](https://github.com/stefanochieli/copilot-effort-guard/commit/74e8a2e47bb90354f3e234df44266230e0a8bfb3))
+
 ## [0.4.0](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.3.0...v0.4.0) (2026-11-02)
 
 
