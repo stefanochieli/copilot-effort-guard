@@ -80,3 +80,25 @@ test('shouldNotify escalates at twice the threshold', () => {
   assert.equal(lib.shouldNotify({ streak: 5 }, { streak: 6, threshold: 3 }), 'escalate')
   assert.equal(lib.shouldNotify({ streak: 6 }, { streak: 7, threshold: 3 }), null)
 })
+
+test('advice is labelled with the session kind and the panel lists the sessions and a reset button', () => {
+  const state = { streak: 0, calm: 8, calmThreshold: 8, turn: {}, log: [], session: { source: 'cli@vscode', id: 'abc' }, sessions: [{ source: 'cli@vscode', id: 'abc', last: '2026-11-03T10:00:00Z' }, { source: 'vscode-chat', id: 'def', last: '2026-11-03T09:00:00Z' }] }
+  const view = lib.computeView(state)
+  assert.equal(view.kind, 'CLI')
+  assert.match(view.hint, /downgrade.*\(CLI session\)/)
+  const html = lib.renderHtml(view)
+  assert.match(html, /Downgrade \u00b7 CLI/)
+  assert.match(html, /Chat \/ def/)
+  assert.match(html, /id="reset"/)
+  assert.equal(lib.renderHtml(view), html, 'html must be stable between renders')
+})
+
+test('resetProject clears streaks and keeps the history', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'eg-reset-'))
+  writeFileSync(join(dir, 'state.json'), JSON.stringify({ streak: 4, calm: 0, log: [{ struggled: true }], turn: { struggled: true, reason: 'x' }, cwd: '/p' }))
+  const next = lib.resetProject(dir)
+  assert.equal(next.streak, 0)
+  assert.equal(next.turn.struggled, false)
+  assert.equal(next.log.length, 1)
+  assert.equal(next.cwd, '/p')
+})

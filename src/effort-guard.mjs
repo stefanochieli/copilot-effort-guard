@@ -96,6 +96,8 @@ export function normaliseEvent(name) {
       return 'status'
     case 'watch':
       return 'watch'
+    case 'reset':
+      return 'reset'
     default:
       return null
   }
@@ -103,6 +105,28 @@ export function normaliseEvent(name) {
 
 export function emptyState() {
   return { turn: { struggled: false, reason: null, command: null }, streak: 0, log: [], pendingWarning: null }
+}
+
+// Starts the evaluation again (after changing model or thinking effort): clears the
+// streaks and the pending turn, keeps the history of past turns.
+export function resetState(state, now = new Date()) {
+  return {
+    ...state,
+    turn: { struggled: false, reason: null, command: null },
+    streak: 0,
+    calm: 0,
+    pendingWarning: null,
+    started: true,
+    resetAt: now.toISOString(),
+  }
+}
+
+// Sessions that recently ran hooks in this folder (the streaks are shared per folder).
+export function touchSession(sessions, session, now = new Date(), limit = 5) {
+  const list = Array.isArray(sessions) ? sessions : []
+  if (!session) return list
+  const rest = list.filter(x => !(x.id === session.id && x.source === session.source))
+  return [{ source: session.source, id: session.id, last: now.toISOString() }, ...rest].slice(0, limit)
 }
 
 // Pure state transitions: the CLI wrapper below only does I/O.
@@ -373,6 +397,16 @@ function status() {
   console.log(`${summary(s)} | current turn ${s.turn.struggled ? `struggling (${s.turn.reason})` : 'ok'}`)
 }
 
+function reset() {
+  const path = statePath()
+  if (!existsSync(path)) {
+    return console.log('effort-guard: nothing to reset in this folder yet.')
+  }
+  save(path, resetState(load(path)))
+  appendFileSync(join(homeDir(), 'events.log'), `${new Date().toISOString()} RESET cwd=${process.cwd()}\n`)
+  console.log('effort-guard: streaks reset, the evaluation starts again.')
+}
+
 // Live view for a second terminal: Copilot has no status bar a hook can draw on.
 // Prints the coloured bar whenever it changes, plus the new events.log lines.
 function watch() {
@@ -410,6 +444,9 @@ function main() {
   if (arg === 'watch') {
     return watch()
   }
+  if (arg === 'reset') {
+    return reset()
+  }
   if (arg === 'summary') {
     return console.log(summary(load(statePath())))
   }
@@ -423,8 +460,10 @@ function main() {
 
   const path = statePath()
   const calmThreshold = Math.max(2, Math.floor(Number(process.env.EFFORT_GUARD_CALM)) || DEFAULT_CALM)
-  const result = run(event, payload, load(path), threshold, new Date(), calmThreshold)
-  result.state = { ...result.state, cwd: process.cwd(), updated: new Date().toISOString(), threshold, calmThreshold, session: readSession(payload) }
+  const before = load(path)
+  const result = run(event, payload, before, threshold, new Date(), calmThreshold)
+  const session = readSession(payload)
+  result.state = { ...result.state, cwd: process.cwd(), updated: new Date().toISOString(), threshold, calmThreshold, session, sessions: touchSession(before.sessions, session), resetAt: before.resetAt }
   save(path, result.state)
   logEvent(event, payload, result.state)
   if (result.stderr) {

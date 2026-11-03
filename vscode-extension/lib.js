@@ -45,6 +45,28 @@ function findState(projects, folders) {
   return matches[0] ?? null
 }
 
+// Starts the evaluation again for one project folder (same effect as `effort-guard reset`).
+function resetProject(dir, now = new Date()) {
+  const file = path.join(dir, 'state.json')
+  const state = JSON.parse(fs.readFileSync(file, 'utf8'))
+  const next = {
+    ...state,
+    turn: { struggled: false, reason: null, command: null },
+    streak: 0,
+    calm: 0,
+    pendingWarning: null,
+    started: true,
+    resetAt: now.toISOString(),
+  }
+  fs.writeFileSync(file, JSON.stringify(next))
+  return next
+}
+
+// 'vscode-chat' -> Chat, 'cli' / 'cli@vscode' -> CLI.
+function sessionKind(source) {
+  return String(source ?? '').startsWith('cli') ? 'CLI' : source === 'vscode-chat' ? 'Chat' : null
+}
+
 const LEVEL_LABEL = { idle: 'No data yet', ok: 'All good', calm: 'Very smooth', watch: 'Some struggle', warn: 'Struggling' }
 // Theme colour ids (work in light and dark themes) and a hex fallback for the webview.
 const LEVEL_THEME_COLOR = { ok: 'testing.iconPassed', calm: 'charts.blue', watch: 'editorWarning.foreground', warn: 'editorError.foreground' }
@@ -89,7 +111,10 @@ function computeView(state, fallbackThreshold = 3) {
   const messages = adviceMessages(streak, threshold, calm)
   // action: what to do with the model settings right now.
   const action = level === 'warn' ? (streak >= threshold * 2 ? 'model-up' : 'thinking-up') : level === 'calm' ? 'down' : null
-  const hint = action === 'model-up' ? messages.escalate : action === 'thinking-up' ? messages.warn : action === 'down' ? messages.calm : null
+  const kind = sessionKind(state.session?.source)
+  const tag = kind ? ` (${kind} session)` : ''
+  const base = action === 'model-up' ? messages.escalate : action === 'thinking-up' ? messages.warn : action === 'down' ? messages.calm : null
+  const hint = base ? base + tag : null
   if (hint) lines.push(hint)
   const icon = level === 'warn' ? 'warning' : level === 'calm' ? 'check' : 'pulse'
   return {
@@ -109,6 +134,9 @@ function computeView(state, fallbackThreshold = 3) {
     timeline: log.slice(-24).map(e => Boolean(e.struggled)),
     hint,
     session: state.session ?? null,
+    kind,
+    sessions: (state.sessions ?? []).map(x => ({ kind: sessionKind(x.source), source: x.source, id: x.id, last: x.last })),
+    resetAt: state.resetAt ?? null,
     cwd: state.cwd ?? null,
     updated: state.updated ?? null,
   }
@@ -124,6 +152,9 @@ function adviceMessages(streak, threshold, calm) {
     calm: `${calm} clean turns in a row, the task looks easy: downgrade to a lighter model or lower the thinking effort to save tokens.`,
   }
 }
+
+// Fixed per process: a new nonce on every render would reload the panel each time.
+const NONCE = Math.random().toString(36).slice(2)
 
 function esc(v) {
   return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
@@ -147,10 +178,13 @@ function renderHtml(view, now = Date.now()) {
     ? view.timeline.map(st => `<span class="dot ${st ? 'bad' : 'good'}"></span>`).join('')
     : '<span class="muted">no turns yet</span>'
   const session = view.session ? `${esc(view.session.source)} / ${esc(view.session.id)}` : '-'
-  const badge = view.action ? `<span class="badge">${esc(ACTION_BADGE[view.action])}</span>` : ''
+  const badge = view.action ? `<span class="badge">${esc(ACTION_BADGE[view.action] + (view.kind ? ' \u00b7 ' + view.kind : ''))}</span>` : ''
+  const sessions = (view.sessions ?? [])
+    .map((x, i) => `<li>${i === 0 ? '<b>' : ''}${esc(x.kind ?? x.source)} / ${esc(x.id)}${i === 0 ? '</b> (latest)' : ''} <span class="muted">${esc(ageText(x.last, now))}</span></li>`)
+    .join('')
   return `<!doctype html>
 <html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${NONCE}';">
 <style>
   :root { --c: ${color}; }
   body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 10px 12px; }
@@ -170,6 +204,9 @@ function renderHtml(view, now = Date.now()) {
   .dot.bad { background: ${LEVEL_HEX.warn}; }
   .hint { margin-top: 12px; padding: 8px; border-left: 3px solid var(--c); background: var(--vscode-textBlockQuote-background, #8881); }
   .muted { opacity: .65; font-size: .9em; }
+  button { margin-top: 12px; width: 100%; padding: 6px; border: 0; border-radius: 3px; cursor: pointer; color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+  button:hover { background: var(--vscode-button-hoverBackground); }
+  ul { margin: 4px 0; padding-left: 18px; line-height: 1.5; }
   .meta { margin-top: 12px; line-height: 1.5; }
 </style></head><body>
 <div class="level"><b>${esc(view.label)}</b>${badge}<span class="count">${view.streak}/${view.threshold} struggling turns in a row</span></div>
@@ -179,7 +216,10 @@ function renderHtml(view, now = Date.now()) {
 <h4>Last turns</h4>
 <div class="timeline">${dots}</div>
 ${view.hint ? `<div class="hint">${esc(view.hint)}</div>` : ''}
+${sessions ? `<h4>Sessions in this folder</h4><ul>${sessions}</ul><div class="muted">Streaks are counted per folder, shared by these sessions.</div>` : ''}
+<button id="reset" title="Use it after changing model or thinking effort">Reset after changing model / thinking</button>
 <div class="meta muted">Session: ${session}<br>Folder: ${esc(view.cwd ?? '-')}<br>Last activity: ${esc(ageText(view.updated, now))}</div>
+<script nonce="${NONCE}">const vs = acquireVsCodeApi(); document.getElementById('reset').addEventListener('click', () => vs.postMessage({ type: 'reset' }))</script>
 </body></html>`
 }
 
@@ -208,4 +248,4 @@ function formatReport(projects, now = Date.now()) {
     .join('\n\n')
 }
 
-module.exports = { copilotHome, readProjects, findState, computeView, levelOf, textBar, renderHtml, shouldNotify, formatReport, isInside, LEVEL_THEME_COLOR, LEVEL_HEX }
+module.exports = { resetProject, sessionKind, copilotHome, readProjects, findState, computeView, levelOf, textBar, renderHtml, shouldNotify, formatReport, isInside, LEVEL_THEME_COLOR, LEVEL_HEX }
