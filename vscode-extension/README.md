@@ -33,3 +33,7 @@ Se `code` non è nel PATH (Windows), usa il percorso completo (`%LOCALAPPDATA%\P
 | `effortGuard.notify` | true | Notifica al raggiungimento della soglia |
 
 L'indicatore si aggiorna ogni 2 secondi. Se resta `effort -` dopo aver usato Copilot, lancia `doctor` per controllare che gli hook girino.
+
+## Reset e sessioni
+
+Dopo aver cambiato modello o thinking effort premi **Reset** nel pannello (o il comando *Effort Guard: Reset after changing model or thinking*): le serie ripartono da zero e la valutazione è sul nuovo modello. Il consiglio indica da quale sessione viene (CLI o Chat) e il pannello elenca le sessioni recenti della cartella; le serie sono contate per cartella, condivise dalle sessioni.
