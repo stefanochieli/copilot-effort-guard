@@ -2,6 +2,9 @@ name: Auto release
 on:
   push:
     branches: [main]
+  # Manual run: recovers a release when GitHub did not deliver the push event of the
+  # merged release PR (no tag was created). release-please then tags and publishes.
+  workflow_dispatch:
 permissions:
   contents: write
   pull-requests: write
