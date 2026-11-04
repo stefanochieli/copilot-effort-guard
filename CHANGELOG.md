@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.7.0...v0.8.0) (2026-11-04)
+
+
+### Features
+
+* IntelliJ plugin and a clearer extension description ([#39](https://github.com/stefanochieli/copilot-effort-guard/issues/39)) ([e9de8a1](https://github.com/stefanochieli/copilot-effort-guard/commit/e9de8a1cd8bebe0cc33a6000be59ce00c53515e6))
+
 ## [0.7.0](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.6.0...v0.7.0) (2026-11-03)
 
 
