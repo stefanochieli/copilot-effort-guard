@@ -49,4 +49,4 @@ Alla release successiva l'estensione comparirà sul Marketplace. Senza il secret
 
 ### Plugin IntelliJ: build e allegato
 
-La CI (`checks` non ne dipende, il job si chiama `intellij-plugin`) compila e prova il plugin con Gradle. A ogni release il job `publish-intellij-plugin` costruisce lo zip e lo allega alla GitHub Release; la versione in `intellij-plugin/gradle.properties` è aggiornata da release-please insieme alle altre. La pubblicazione sul JetBrains Marketplace non è configurata: richiede un account JetBrains, una revisione della scheda e un token (`PUBLISH_TOKEN`) da aggiungere al job.
+La CI (`checks` non ne dipende, il job si chiama `intellij-plugin`) compila e prova il plugin con Gradle. A ogni release il job `publish-intellij-plugin` costruisce lo zip e lo allega alla GitHub Release; la versione in `intellij-plugin/gradle.properties` è aggiornata da release-please insieme alle altre. Se nei secret c'è `JETBRAINS_PUBLISH_TOKEN`, il job pubblica lo zip anche sul JetBrains Marketplace (`publishPlugin`; il primo upload della scheda è manuale, ogni versione passa da una revisione JetBrains).

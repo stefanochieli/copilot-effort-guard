@@ -27,7 +27,7 @@ La cartella dello stato è `~/.copilot` oppure quella della variabile d'ambiente
 
 ## Installazione
 
-Dalle [GitHub Release](https://github.com/stefanochieli/copilot-effort-guard/releases): scarica `copilot-effort-guard-intellij-<versione>.zip`, poi in IntelliJ *Settings | Plugins | ⚙ | Install Plugin from Disk…* e riavvia l'IDE. Gli aggiornamenti sono manuali finché il plugin non è sul JetBrains Marketplace.
+Dalle [GitHub Release](https://github.com/stefanochieli/copilot-effort-guard/releases): scarica `copilot-effort-guard-intellij-<versione>.zip`, poi in IntelliJ *Settings | Plugins | ⚙ | Install Plugin from Disk…* e riavvia l'IDE. In alternativa cerca *Copilot Effort Guard* in *Settings | Plugins | Marketplace* (aggiornamenti automatici).
 
 Da sorgente:
 
@@ -54,4 +54,4 @@ La logica in `core/` ha i suoi test (`EffortCoreTest.kt`); l'interfaccia si prov
 
 ## Release
 
-La versione in `gradle.properties` è aggiornata da release-please insieme al resto del repository. A ogni release il job `publish-intellij-plugin` costruisce lo zip e lo allega alla GitHub Release. Per pubblicare sul JetBrains Marketplace servono un account JetBrains, la revisione della scheda del plugin e un token da salvare come secret del repo; non è ancora configurato.
+La versione in `gradle.properties` è aggiornata da release-please insieme al resto del repository. A ogni release il job `publish-intellij-plugin` costruisce lo zip e lo allega alla GitHub Release. Se nei secret del repo c'è `JETBRAINS_PUBLISH_TOKEN` (token di <https://plugins.jetbrains.com/author/me/tokens>), lo stesso job pubblica lo zip anche sul JetBrains Marketplace con `publishPlugin`; ogni versione passa da una breve revisione JetBrains. Il primo upload della scheda va fatto a mano.
