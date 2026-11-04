@@ -1,0 +1,39 @@
+<idea-plugin>
+    <id>com.stefanochieli.copilot-effort-guard</id>
+    <name>Copilot Effort Guard</name>
+    <vendor url="https://github.com/stefanochieli/copilot-effort-guard">Stefano Chieli</vendor>
+
+    <description><![CDATA[
+    Shows how hard the GitHub Copilot model is struggling, as a colour bar in the status bar and in a tool window.
+    <ul>
+      <li>Status bar: <code>🟢 ▰▱▱ 1/3</code>, a segmented bar of struggling turns in a row, with a colour per state.</li>
+      <li>Tool window <b>Effort Guard</b>: big bar, progress towards a clean run, coloured history of the last turns, advice and sessions.</li>
+      <li>Advice in two steps: raise the thinking effort, then switch to a more powerful model; downgrade when the task looks easy.</li>
+      <li><b>Reset</b> button (and <i>Tools | Effort Guard: Reset</i>) after changing model or thinking effort.</li>
+    </ul>
+    It reads the state written by the hooks of
+    <a href="https://github.com/stefanochieli/copilot-effort-guard">copilot-effort-guard</a>
+    (<code>node scripts/install.mjs --user</code>), so the hooks must be installed first.
+    Works with the Copilot CLI run from the IDE terminal, and with any Copilot agent that runs the hooks.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <statusBarWidgetFactory id="effortGuard.status"
+                                implementation="com.stefanochieli.effortguard.ui.EffortStatusBarWidgetFactory"/>
+        <toolWindow id="Effort Guard" anchor="right" icon="/icons/effortGuard.svg" canCloseContents="false"
+                    factoryClass="com.stefanochieli.effortguard.ui.EffortToolWindowFactory"/>
+        <notificationGroup id="Effort Guard" displayType="BALLOON"/>
+        <postStartupActivity implementation="com.stefanochieli.effortguard.ui.EffortStartup"/>
+    </extensions>
+
+    <actions>
+        <action id="effortGuard.Reset"
+                class="com.stefanochieli.effortguard.ui.ResetAction"
+                text="Effort Guard: Reset After Changing Model or Thinking"
+                description="Starts the Effort Guard evaluation again (streaks back to zero)">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>

@@ -1,3 +1,4 @@
 .vscode/**
 *.vsix
 media/logo.svg
+media/screenshot-*.png
