@@ -100,8 +100,9 @@ jobs:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: npx --yes @vscode/vsce publish --no-dependencies --packagePath "$GITHUB_WORKSPACE/copilot-effort-guard-status.vsix"
 
-  # Runs only when a release was just tagged: builds the IntelliJ plugin and attaches
-  # the zip to the GitHub Release (install it with Settings | Plugins | Install Plugin from Disk).
+  # Runs only when a release was just tagged: builds the IntelliJ plugin, attaches
+  # the zip to the GitHub Release (install it with Settings | Plugins | Install Plugin from Disk)
+  # and, if the secret JETBRAINS_PUBLISH_TOKEN is set, publishes it to the JetBrains Marketplace.
   publish-intellij-plugin:
     needs: release
     if: ${{ needs.release.outputs.release_created == 'true' }}
@@ -110,6 +111,7 @@ jobs:
       contents: write
     env:
       TAG: ${{ needs.release.outputs.tag_name }}
+      HAS_JETBRAINS_TOKEN: ${{ secrets.JETBRAINS_PUBLISH_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -126,3 +128,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$TAG" intellij-plugin/build/distributions/*.zip --clobber
+      - name: Publish to the JetBrains Marketplace
+        if: ${{ env.HAS_JETBRAINS_TOKEN == 'true' }}
+        working-directory: intellij-plugin
+        env:
+          PUBLISH_TOKEN: ${{ secrets.JETBRAINS_PUBLISH_TOKEN }}
+        run: ./gradlew --no-daemon publishPlugin

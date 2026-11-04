@@ -37,8 +37,12 @@ intellijPlatform {
             untilBuild = provider { null }
         }
     }
-    // Plugin Marketplace signing and publishing are not set up yet: the zip is attached
-    // to the GitHub Release and installed from disk.
+    // The zip is also attached to the GitHub Release (install from disk). The release
+    // workflow publishes it to the JetBrains Marketplace with `publishPlugin` when the
+    // secret JETBRAINS_PUBLISH_TOKEN is set (exposed as PUBLISH_TOKEN).
+    publishing {
+        token = providers.environmentVariable("PUBLISH_TOKEN")
+    }
     buildSearchableOptions = false
 }
 
