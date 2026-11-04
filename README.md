@@ -13,7 +13,7 @@ Hook per **GitHub Copilot** (Copilot CLI e agent hooks di VS Code) che osserva i
 
 Documentazione: [setup](docs/SETUP.md), [funzionamento](docs/FUNZIONAMENTO.md), [prove sul tuo Copilot](TESTING.md). In breve: `node scripts/install.mjs --user` (globale, CLI e VS Code) oppure `node scripts/install.mjs <repo>` (team).
 
-Barra nella status bar di VS Code: estensione in [`vscode-extension/`](vscode-extension/README.md). Comandi: `summary`, `doctor` (report leggibile: setup, ultime chiamate, avvisi, tabella dei progetti), `selftest` (verifica locale senza Copilot), `reset` (azzera le serie dopo aver cambiato modello o thinking; nell'estensione c'è il pulsante *Reset* nel pannello e il comando *Effort Guard: Reset…*). Opzioni via ambiente: `EFFORT_GUARD_THRESHOLD`, `EFFORT_GUARD_DIR`, `EFFORT_GUARD_DEBUG=1` (salva i payload grezzi).
+Barra nella status bar di VS Code: estensione in [`vscode-extension/`](vscode-extension/README.md). Lo stesso indicatore per IntelliJ IDEA e gli altri IDE JetBrains: plugin in [`intellij-plugin/`](intellij-plugin/README.md). Comandi: `summary`, `doctor` (report leggibile: setup, ultime chiamate, avvisi, tabella dei progetti), `selftest` (verifica locale senza Copilot), `reset` (azzera le serie dopo aver cambiato modello o thinking; nell'estensione c'è il pulsante *Reset* nel pannello e il comando *Effort Guard: Reset…*). Opzioni via ambiente: `EFFORT_GUARD_THRESHOLD`, `EFFORT_GUARD_DIR`, `EFFORT_GUARD_DEBUG=1` (salva i payload grezzi).
 
 ## Limiti
 
@@ -46,3 +46,7 @@ Una tantum, a cura del proprietario del repo:
 3. Salvalo come secret del repo `VSCE_PAT` (Settings → Secrets and variables → Actions).
 
 Alla release successiva l'estensione comparirà sul Marketplace. Senza il secret il job allega solo il `.vsix`.
+
+### Plugin IntelliJ: build e allegato
+
+La CI (`checks` non ne dipende, il job si chiama `intellij-plugin`) compila e prova il plugin con Gradle. A ogni release il job `publish-intellij-plugin` costruisce lo zip e lo allega alla GitHub Release; la versione in `intellij-plugin/gradle.properties` è aggiornata da release-please insieme alle altre. La pubblicazione sul JetBrains Marketplace non è configurata: richiede un account JetBrains, una revisione della scheda e un token (`PUBLISH_TOKEN`) da aggiungere al job.

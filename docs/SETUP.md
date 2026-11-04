@@ -48,6 +48,7 @@ Variabili d'ambiente (nel profilo della shell o nelle impostazioni dell'ambiente
 node ~/.copilot/effort-guard/effort-guard.mjs doctor     # configurazione e riepilogo
 node ~/.copilot/effort-guard/effort-guard.mjs summary    # riepilogo dei turni
 node ~/.copilot/effort-guard/effort-guard.mjs selftest   # prova locale senza Copilot
+node ~/.copilot/effort-guard/effort-guard.mjs reset      # azzera le serie dopo aver cambiato modello o thinking
 ```
 
 ## Aggiornare
@@ -82,3 +83,7 @@ Per avere un indicatore sempre visibile (barra `▰▱▱ 1/3` che cambia colore
 - **Turni registrati ma nessun avviso visibile**: il client non mostra stderr o `additionalContext`; l'avviso resta nel riepilogo.
 - **Falsi positivi**: alza `EFFORT_GUARD_THRESHOLD`.
 - **Verifica dei payload reali**: vedi [TESTING.md](../TESTING.md).
+
+## Plugin per IntelliJ e gli altri IDE JetBrains
+
+Lo stesso indicatore esiste come plugin per IntelliJ IDEA (e per gli altri IDE basati sulla IntelliJ Platform, versione 2024.2 o successiva): voce nella status bar, tool window *Effort Guard* con barra, cronologia, consiglio e sessioni, pulsante *Reset* e notifiche. Legge lo stesso stato degli hook, quindi va installato dopo di loro: vedi [`intellij-plugin/`](../intellij-plugin/README.md). Gli hook vanno comunque installati con `node scripts/install.mjs --user`.

@@ -1,7 +1,7 @@
 {
   "name": "copilot-effort-guard-status",
   "displayName": "Copilot Effort Guard",
-  "description": "Status bar and side panel for copilot-effort-guard: a colour bar showing how hard the Copilot model is struggling.",
+  "description": "Colour bar and side panel showing how hard the GitHub Copilot model is struggling, with advice: raise thinking, upgrade the model, or downgrade when the task is easy.",
   "version": "0.7.0",
   "publisher": "stefanochieli",
   "icon": "media/icon.png",
@@ -20,6 +20,7 @@
     "vscode": "^1.85.0"
   },
   "categories": [
+    "AI",
     "Other"
   ],
   "main": "./extension.js",
@@ -76,5 +77,16 @@
         }
       ]
     }
-  }
+  },
+  "keywords": [
+    "copilot",
+    "github copilot",
+    "effort",
+    "thinking",
+    "reasoning",
+    "model",
+    "agent",
+    "hooks",
+    "status bar"
+  ]
 }

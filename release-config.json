@@ -11,6 +11,10 @@
           "type": "json",
           "path": "vscode-extension/package.json",
           "jsonpath": "$.version"
+        },
+        {
+          "type": "generic",
+          "path": "intellij-plugin/gradle.properties"
         }
       ]
     }
