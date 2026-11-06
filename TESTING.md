@@ -20,6 +20,8 @@ Per un repository (condiviso col team via git): `node scripts/install.mjs <carte
 3. `node <percorso>/effort-guard.mjs doctor` mostra il riepilogo; `.effort-guard/payloads.jsonl` contiene i payload grezzi di ogni evento.
 4. Se un evento non compare in `payloads.jsonl`, quell'host non lo invia: segnalalo con una issue allegando il file (senza dati sensibili: contiene comandi e output dei tool).
 
+Con `EFFORT_GUARD_DEBUG=1`, se lo stdin non è JSON valido, `payloads.jsonl` conserva anche il testo grezzo (`stdinRaw`) e l'errore (`stdinError`). Le fixture in `tests/fixtures/` sono costruite a mano dagli schemi documentati: dopo la cattura vanno sostituite con i payload reali anonimizzati.
+
 ## 4. Cosa aspettarsi
 
 - Alla soglia l'avviso compare su stderr al prompt successivo e viene passato all'agente come `additionalContext` al primo evento di tool seguente (VS Code non accetta contesto dall'hook del prompt).

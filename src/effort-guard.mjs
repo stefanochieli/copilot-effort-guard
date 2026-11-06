@@ -10,8 +10,8 @@
 // Observation only: it never denies a tool call. Payload field names are read
 // defensively because Copilot delivers camelCase or snake_case depending on the
 // event key casing and version.
-import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, readdirSync, statSync, renameSync, rmdirSync, rmSync } from 'node:fs'
+import { dirname, join, relative, isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
@@ -131,6 +131,12 @@ export function touchSession(sessions, session, now = new Date(), limit = 5) {
 
 // Pure state transitions: the CLI wrapper below only does I/O.
 export function onTool(state, payload, { failed: failedEvent = false } = {}) {
+  // errorOccurred also reports model, system and user-input errors: only a failed
+  // tool execution says anything about the task being hard.
+  const errorContext = pick(payload, 'errorContext', 'error_context')
+  if (errorContext !== undefined && errorContext !== 'tool_execution') {
+    return state
+  }
   const { tool, command, text, resultType } = readTool(payload)
   const failed = failedEvent || resultType === 'failure'
   const isShell = /^(bash|shell|powershell|pwsh|run_in_terminal|runInTerminal|terminal|execute)/i.test(tool)
@@ -211,14 +217,40 @@ export function copilotHome() {
   return process.env.COPILOT_HOME ?? join(homedir(), '.copilot')
 }
 
+// Windows paths are case-insensitive and may come with either slash: one project
+// must map to one state folder whichever spelling the host uses.
+function normaliseCwd(cwd) {
+  const s = resolve(String(cwd))
+  return process.platform === 'win32' ? s.replace(/\\/g, '/').toLowerCase() : s
+}
+
+function isUnder(file, dir) {
+  const a = process.platform === 'win32' ? file.toLowerCase() : file
+  const b = process.platform === 'win32' ? dir.toLowerCase() : dir
+  const rel = relative(b, a)
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+}
+
+// Working directory of the session: the payload's `cwd` when it is a real folder,
+// otherwise the one the process was started in.
+let activeCwd = process.cwd()
+export function payloadCwd(payload) {
+  const c = pick(payload, 'cwd')
+  try {
+    return typeof c === 'string' && c && statSync(c).isDirectory() ? c : undefined
+  } catch {
+    return undefined
+  }
+}
+
 // Per-user install (script under ~/.copilot): keep state out of the projects,
 // one folder per working directory. Otherwise: .effort-guard/ in the project.
-export function stateDir(cwd = process.cwd(), self = fileURLToPath(import.meta.url)) {
+export function stateDir(cwd = activeCwd, self = fileURLToPath(import.meta.url)) {
   if (process.env.EFFORT_GUARD_DIR) {
     return process.env.EFFORT_GUARD_DIR
   }
-  if (self.startsWith(copilotHome())) {
-    return join(dirname(self), 'state', createHash('sha1').update(cwd).digest('hex').slice(0, 12))
+  if (isUnder(self, copilotHome())) {
+    return join(dirname(self), 'state', createHash('sha1').update(normaliseCwd(cwd)).digest('hex').slice(0, 12))
   }
   return join(cwd, '.effort-guard')
 }
@@ -227,17 +259,85 @@ function statePath() {
   return join(stateDir(), 'state.json')
 }
 
+// A state file is usable only if the fields the logic touches have the right shape.
+export function validState(v) {
+  return Boolean(
+    v &&
+      typeof v === 'object' &&
+      !Array.isArray(v) &&
+      v.turn &&
+      typeof v.turn === 'object' &&
+      Array.isArray(v.log) &&
+      (v.streak === undefined || Number.isFinite(v.streak)),
+  )
+}
+
+// Unreadable or wrongly shaped files are moved to state.json.bad (one backup) and
+// the evaluation starts again, instead of failing on every hook call.
 function load(path) {
+  let raw
   try {
-    return { ...emptyState(), ...JSON.parse(readFileSync(path, 'utf8')) }
+    raw = readFileSync(path, 'utf8')
   } catch {
     return emptyState()
   }
+  try {
+    const parsed = JSON.parse(raw)
+    if (validState(parsed)) {
+      return { ...emptyState(), ...parsed }
+    }
+  } catch {}
+  try {
+    renameSync(path, `${path}.bad`)
+  } catch {}
+  return emptyState()
 }
 
+// Written to a temporary file and renamed, so a reader (the IDE extensions) never
+// sees a half-written file.
 function save(path, state) {
   mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, JSON.stringify(state))
+  const tmp = `${path}.${process.pid}.tmp`
+  writeFileSync(tmp, JSON.stringify(state))
+  try {
+    renameSync(tmp, path)
+  } catch {
+    // Windows can refuse to replace a file another process has open.
+    writeFileSync(path, JSON.stringify(state))
+    rmSync(tmp, { force: true })
+  }
+}
+
+// Serialises the read-modify-write of two hook processes (parallel tool calls,
+// two sessions in one folder). Never blocks the agent for long: after ~1.5 s it
+// carries on without the lock.
+function withLock(path, fn) {
+  const lock = `${path}.lock`
+  mkdirSync(dirname(path), { recursive: true })
+  let held = false
+  for (let i = 0; i < 75 && !held; i++) {
+    try {
+      mkdirSync(lock)
+      held = true
+    } catch {
+      try {
+        if (Date.now() - statSync(lock).mtimeMs > 5000) {
+          rmdirSync(lock)
+          continue
+        }
+      } catch {}
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20)
+    }
+  }
+  try {
+    return fn()
+  } finally {
+    if (held) {
+      try {
+        rmdirSync(lock)
+      } catch {}
+    }
+  }
 }
 
 // EFFORT_GUARD_DEBUG=1 keeps every raw payload, so the real field names of a
@@ -245,7 +345,7 @@ function save(path, state) {
 // Folder shared by all working directories: holds events.log (one line per hook
 // call, no tool output) so "do the hooks fire at all?" can be answered.
 export function homeDir(self = fileURLToPath(import.meta.url)) {
-  return self.startsWith(copilotHome()) ? dirname(self) : stateDir()
+  return isUnder(self, copilotHome()) ? dirname(self) : stateDir()
 }
 
 function logEvent(event, payload, state, now = new Date()) {
@@ -254,7 +354,7 @@ function logEvent(event, payload, state, now = new Date()) {
   const path = join(dir, 'events.log')
   mkdirSync(dir, { recursive: true })
   const { tool } = readTool(payload)
-  const line = `${now.toISOString()} ${event}${tool ? ` tool=${tool}` : ''} struggled=${state.turn.struggled} streak=${state.streak} session=${id} src=${source} cwd=${process.cwd()}\n`
+  const line = `${now.toISOString()} ${event}${tool ? ` tool=${tool}` : ''} struggled=${state.turn.struggled} streak=${state.streak} session=${id} src=${source} cwd=${activeCwd}\n`
   appendFileSync(path, line)
   try {
     if (statSync(path).size > 200_000) {
@@ -271,12 +371,14 @@ function lastEvents(n) {
   }
 }
 
-function debugDump(event, payload) {
+function debugDump(event, payload, input = {}) {
   if (!process.env.EFFORT_GUARD_DEBUG) {
     return
   }
   mkdirSync(stateDir(), { recursive: true })
-  appendFileSync(join(stateDir(), 'payloads.jsonl'), JSON.stringify({ ts: new Date().toISOString(), event, payload }) + '\n')
+  // When stdin was not valid JSON the raw text is kept too, so the capture shows why.
+  const extra = input.error ? { stdinError: input.error, stdinRaw: String(input.raw).slice(0, 4000) } : {}
+  appendFileSync(join(stateDir(), 'payloads.jsonl'), JSON.stringify({ ts: new Date().toISOString(), event, payload, ...extra }) + '\n')
 }
 
 // Output understood by VS Code agent hooks (common output format plus
@@ -289,10 +391,24 @@ export function warningOutput(warning, hookEventName) {
   }
 }
 
+// Identifies one prompt: the same prompt reaching two registered hooks has the same
+// session and timestamp. Without both there is no safe way to tell, so no key.
+export function promptKey(payload) {
+  const session = pick(payload, 'session_id', 'sessionId')
+  const ts = pick(payload, 'timestamp')
+  return session !== undefined && ts !== undefined ? `${session}|${ts}` : null
+}
+
 export function run(event, payload, state, threshold, now = new Date(), calmThreshold = DEFAULT_CALM) {
   if (event === 'prompt') {
+    // The same hook registered twice (user and repository files) delivers the same
+    // prompt twice: closing the turn twice would see a clean turn and reset the streak.
+    const key = promptKey(payload)
+    if (key && state.lastPromptKey === key) {
+      return { state, stderr: null, stdout: null, notice: null, duplicate: true }
+    }
     const closed = closeTurn(state, threshold, now, calmThreshold)
-    return { state: closed.state, stderr: closed.warning, stdout: null, notice: closed.notice }
+    return { state: key ? { ...closed.state, lastPromptKey: key } : closed.state, stderr: closed.warning, stdout: null, notice: closed.notice }
   }
 
   if (event === 'tool' || event === 'failure') {
@@ -302,7 +418,8 @@ export function run(event, payload, state, threshold, now = new Date(), calmThre
     if (next.pendingWarning) {
       const warning = next.pendingWarning
       next = { ...next, pendingWarning: null }
-      return { state: next, stderr: warning, stdout: warningOutput(warning, 'PostToolUse') }
+      const name = pick(payload, 'hook_event_name', 'hookEventName') ?? (event === 'failure' ? 'PostToolUseFailure' : 'PostToolUse')
+      return { state: next, stderr: warning, stdout: warningOutput(warning, name), delivered: true }
     }
     return { state: next, stderr: null, stdout: null }
   }
@@ -310,11 +427,20 @@ export function run(event, payload, state, threshold, now = new Date(), calmThre
   return { state, stderr: null, stdout: null }
 }
 
+// Strips a UTF-8 BOM (PowerShell can add one) before parsing.
+export function parseInput(raw) {
+  try {
+    return { payload: JSON.parse(String(raw).replace(/^\uFEFF/, '') || '{}'), raw }
+  } catch (err) {
+    return { payload: {}, raw, error: err.message }
+  }
+}
+
 function readStdin() {
   try {
-    return JSON.parse(readFileSync(0, 'utf8') || '{}')
-  } catch {
-    return {}
+    return parseInput(readFileSync(0, 'utf8'))
+  } catch (err) {
+    return { payload: {}, raw: '', error: err.message }
   }
 }
 
@@ -403,7 +529,7 @@ function reset() {
     return console.log('effort-guard: nothing to reset in this folder yet.')
   }
   save(path, resetState(load(path)))
-  appendFileSync(join(homeDir(), 'events.log'), `${new Date().toISOString()} RESET cwd=${process.cwd()}\n`)
+  appendFileSync(join(homeDir(), 'events.log'), `${new Date().toISOString()} RESET cwd=${activeCwd}\n`)
   console.log('effort-guard: streaks reset, the evaluation starts again.')
 }
 
@@ -451,37 +577,49 @@ function main() {
     return console.log(summary(load(statePath())))
   }
 
-  const payload = readStdin()
+  const input = readStdin()
+  const payload = input.payload
+  const cwd = payloadCwd(payload)
+  if (cwd) {
+    activeCwd = cwd
+  }
   const event = normaliseEvent(pick(payload, 'hook_event_name', 'hookEventName')) ?? arg
   if (!event) {
     return
   }
-  debugDump(event, payload)
+  debugDump(event, payload, input)
 
   const path = statePath()
   const calmThreshold = Math.max(2, Math.floor(Number(process.env.EFFORT_GUARD_CALM)) || DEFAULT_CALM)
-  const before = load(path)
-  const result = run(event, payload, before, threshold, new Date(), calmThreshold)
-  const session = readSession(payload)
-  result.state = { ...result.state, cwd: process.cwd(), updated: new Date().toISOString(), threshold, calmThreshold, session, sessions: touchSession(before.sessions, session), resetAt: before.resetAt }
-  save(path, result.state)
-  logEvent(event, payload, result.state)
-  if (result.stderr) {
-    appendFileSync(join(homeDir(), 'events.log'), `${new Date().toISOString()} WARNING ${result.stderr}\n`)
-  }
+  withLock(path, () => {
+    const before = load(path)
+    const result = run(event, payload, before, threshold, new Date(), calmThreshold)
+    if (result.duplicate) {
+      return
+    }
+    const session = readSession(payload)
+    result.state = { ...result.state, cwd: activeCwd, updated: new Date().toISOString(), threshold, calmThreshold, session, sessions: touchSession(before.sessions, session), resetAt: before.resetAt }
+    save(path, result.state)
+    logEvent(event, payload, result.state)
+    // The warning is logged once, when the prompt hook produces it; the copy handed
+    // over on a tool event is the same message.
+    if (result.stderr && event === 'prompt') {
+      appendFileSync(join(homeDir(), 'events.log'), `${new Date().toISOString()} WARNING ${result.stderr}\n`)
+    }
 
-  if (result.notice) {
-    // Only logged and shown by the extension: it is not fed to the agent as context.
-    appendFileSync(join(homeDir(), 'events.log'), `${new Date().toISOString()} INFO ${result.notice}\n`)
-  }
+    if (result.notice) {
+      // Only logged and shown by the extension: it is not fed to the agent as context.
+      appendFileSync(join(homeDir(), 'events.log'), `${new Date().toISOString()} INFO ${result.notice}\n`)
+    }
 
-  if (result.stderr) {
-    // stderr is shown to the user; stdout JSON is offered to the agent as context.
-    console.error(result.stderr)
-  }
-  if (result.stdout) {
-    console.log(JSON.stringify(result.stdout))
-  }
+    if (result.stderr) {
+      // stderr is shown to the user; stdout JSON is offered to the agent as context.
+      console.error(result.stderr)
+    }
+    if (result.stdout) {
+      console.log(JSON.stringify(result.stdout))
+    }
+  })
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

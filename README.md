@@ -6,7 +6,7 @@ Hook per **GitHub Copilot** (Copilot CLI e agent hooks di VS Code) che osserva i
 
 - **Turno faticoso**: un tool fallito (`postToolUseFailure` o `resultType: "failure"`), un comando di test/build (`npm test`, `ng test`, `mvn`, `gradle`, `pytest`, `go test`…) il cui output contiene un fallimento anche con exit code 0, oppure lo stesso comando fallito due volte nel turno.
 - **Escalation**: alla soglia (default 3) l'avviso va su stderr e viene offerto all'agente come `additionalContext`. Un turno pulito azzera la serie.
-- **Stato**: `.effort-guard/state.json` (ignorato da git); cartella cambiabile con `EFFORT_GUARD_DIR`, soglia con `EFFORT_GUARD_THRESHOLD`.
+- **Stato**: `.effort-guard/state.json` (l'installazione per repository aggiunge `.effort-guard/` al `.gitignore` del repo, salvo `--no-gitignore`); cartella cambiabile con `EFFORT_GUARD_DIR`, soglia con `EFFORT_GUARD_THRESHOLD`.
 - `npm run summary` stampa il riepilogo dei turni.
 
 ## Uso
@@ -17,7 +17,7 @@ Barra nella status bar di VS Code: estensione in [`vscode-extension/`](vscode-ex
 
 ## Limiti
 
-Niente banda sopra il prompt, toast o slash command (Copilot non li offre) e gli hook non espongono token/contesto. Supporta sia gli eventi della CLI (`userPromptSubmitted`, `postToolUse`, `errorOccurred`) sia quelli di VS Code (`UserPromptSubmit`, `PostToolUse`, riconosciuti da `hook_event_name`). I nomi dei campi sono stati ricavati dalla documentazione e non ancora verificati su una sessione reale: usa il dump dei payload per controllarli.
+Niente banda sopra il prompt, toast o slash command (Copilot non li offre) e gli hook non espongono token/contesto. Supporta sia gli eventi della CLI (`userPromptSubmitted`, `postToolUse`, `errorOccurred`) sia quelli di VS Code (`UserPromptSubmit`, `PostToolUse`, riconosciuti da `hook_event_name`). I nomi dei campi sono stati ricavati dalla documentazione e non ancora verificati su una sessione reale: usa il dump dei payload per controllarli (le fixture in `tests/fixtures/` sono costruite dagli schemi documentati, non catturate). Verificato dal vivo finora solo che gli hook partono su VS Code (2026-11-02). In particolare non è confermato dove Copilot metta l'exit code di un comando: oggi un comando con exit code diverso da 0 conta solo se l'evento è un fallimento o se è un comando di test con output di fallimento. Se lo stesso hook è registrato due volte (file utente e file del repo) il duplicato viene scartato solo quando il payload ha sessione e timestamp.
 
 ## Sviluppo
 

@@ -52,7 +52,7 @@ test('a postToolUse result with resultType "failure" counts as a tool error', ()
 })
 
 import { normaliseEvent, run, warningOutput } from '../src/effort-guard.mjs'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, execFile } from 'node:child_process'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -249,4 +249,122 @@ test('resetState clears streaks but keeps the log; touchSession keeps the latest
   list = touchSession(list, { source: 'vscode-chat', id: 'b' })
   list = touchSession(list, { source: 'cli', id: 'a' })
   assert.deepEqual(list.map(x => x.id), ['a', 'b'])
+})
+
+// ---- review fixes -----------------------------------------------------------
+// Fixtures in tests/fixtures are built from the documented schemas, NOT captured
+// from a real Copilot session (see tests/fixtures/README.md).
+import { promptKey, parseInput, validState, payloadCwd } from '../src/effort-guard.mjs'
+import { existsSync, writeFileSync, mkdirSync } from 'node:fs'
+
+const fixture = name => JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url), 'utf8'))
+
+test('documented fixtures: CLI camelCase and VS Code snake_case give the same reading', () => {
+  const cli = readTool(fixture('docs-cli-postToolUse-success'))
+  assert.deepEqual([cli.tool, cli.command, cli.resultType, cli.text], ['bash', 'npm run ok', 'success', 'all passed'])
+  const vs = readTool(fixture('docs-vscode-PostToolUse'))
+  assert.deepEqual([vs.tool, vs.command, vs.text], ['run_in_terminal', 'npm test', 'FAIL src/a.test.js'])
+  assert.equal(onTool(emptyState(), fixture('docs-vscode-PostToolUse')).turn.struggled, true)
+  assert.equal(onTool(emptyState(), fixture('docs-cli-postToolUseFailure'), { failed: true }).turn.reason, 'tool_error')
+})
+
+test('errorOccurred counts only failed tool executions, not model or system errors', () => {
+  assert.equal(onTool(emptyState(), fixture('docs-cli-errorOccurred-model'), { failed: true }).turn.struggled, false)
+  assert.equal(onTool(emptyState(), fixture('docs-cli-errorOccurred-tool'), { failed: true }).turn.struggled, true)
+})
+
+test('the same prompt delivered twice (hook registered twice) closes the turn once', () => {
+  const prompt = fixture('docs-cli-userPromptSubmitted')
+  assert.equal(promptKey(prompt), 'sess-0001|1760000000000')
+  assert.equal(promptKey({ hook_event_name: 'UserPromptSubmit' }), null)
+  let state = emptyState()
+  for (let i = 0; i < 6; i++) {
+    const p = { ...prompt, timestamp: prompt.timestamp + i }
+    state = run('prompt', p, state, 3).state
+    state = run('prompt', p, state, 3).state // duplicate delivery
+    state = run('tool', failingTest, state, 3).state
+    state = run('tool', failingTest, state, 3).state
+  }
+  assert.equal(closeTurn(state, 3).state.streak, 6)
+})
+
+test('the delivered warning names the event it was delivered on', () => {
+  const pending = { ...emptyState(), started: true, pendingWarning: 'W' }
+  assert.equal(run('failure', { toolName: 'x' }, pending, 3).stdout.hookSpecificOutput.hookEventName, 'PostToolUseFailure')
+  assert.equal(run('tool', { hook_event_name: 'PostToolUse' }, pending, 3).stdout.hookSpecificOutput.hookEventName, 'PostToolUse')
+})
+
+test('stdin with a BOM parses; invalid stdin is reported instead of silently dropped', () => {
+  assert.deepEqual(parseInput('﻿{"a":1}').payload, { a: 1 })
+  const bad = parseInput('{"a":')
+  assert.deepEqual(bad.payload, {})
+  assert.ok(bad.error)
+})
+
+test('state files: wrong shape is rejected, a corrupt one is moved aside and the hooks keep working', () => {
+  assert.equal(validState({ turn: null, log: [] }), false)
+  assert.equal(validState({ turn: {}, log: 'x' }), false)
+  assert.equal(validState(emptyState()), true)
+  const dir = mkdtempSync(join(tmpdir(), 'eg-'))
+  const env = { ...process.env, EFFORT_GUARD_DIR: dir }
+  const call = (payload, arg) => execFileSync('node', ['src/effort-guard.mjs', arg], { input: JSON.stringify(payload), env, encoding: 'utf8' })
+  for (const bad of ['{"turn":{"struggled":tr', '{"log":"x","turn":null}']) {
+    writeFileSync(join(dir, 'state.json'), bad)
+    call({}, 'prompt')
+    assert.equal(readFileSync(join(dir, 'state.json.bad'), 'utf8'), bad)
+    assert.equal(validState(JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8'))), true)
+  }
+})
+
+test('parallel hook processes do not lose updates or leave a lock behind', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'eg-'))
+  const env = { ...process.env, EFFORT_GUARD_DIR: dir }
+  const spawn = payload => new Promise(res => {
+    const c = execFile('node', ['src/effort-guard.mjs', 'prompt'], { env }, () => res())
+    c.stdin.end(JSON.stringify(payload))
+  })
+  return Promise.all(Array.from({ length: 8 }, (_, i) => spawn({ session_id: 's', timestamp: i }))).then(() => {
+    assert.equal(existsSync(join(dir, 'state.json.lock')), false)
+    const lines = readFileSync(join(dir, 'events.log'), 'utf8').trim().split('\n').filter(l => / prompt /.test(l))
+    assert.equal(lines.length, 8)
+    assert.equal(JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8')).log.length, 7) // first prompt only opens the first turn
+  })
+})
+
+test('the payload cwd picks the state folder when it is a real directory', () => {
+  assert.equal(payloadCwd({ cwd: tmpdir() }), tmpdir())
+  assert.equal(payloadCwd({ cwd: '/no/such/dir-xyz' }), undefined)
+  assert.equal(payloadCwd({}), undefined)
+  const self = join(homedir(), '.copilot', 'effort-guard', 'effort-guard.mjs')
+  assert.equal(stateDir(tmpdir(), self), stateDir(tmpdir() + '/', self))
+})
+
+test('the warning is written once to events.log even though it is handed over on a tool event', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'eg-'))
+  const env = { ...process.env, EFFORT_GUARD_DIR: dir, EFFORT_GUARD_THRESHOLD: '1' }
+  const call = (payload, arg) => execFileSync('node', ['src/effort-guard.mjs', arg], { input: JSON.stringify(payload), env, encoding: 'utf8' })
+  call({}, 'prompt')
+  call(failingTest, 'tool')
+  call({}, 'prompt')
+  call(failingTest, 'tool')
+  assert.equal(readFileSync(join(dir, 'events.log'), 'utf8').split('\n').filter(l => / WARNING /.test(l)).length, 1)
+})
+
+test('installer: repo install ignores the state in git, uninstall keeps the user state', () => {
+  const home = mkdtempSync(join(tmpdir(), 'eg-home-'))
+  const repo = mkdtempSync(join(tmpdir(), 'eg-repo-'))
+  const env = { ...process.env, COPILOT_HOME: home }
+  const install = (...a) => execFileSync('node', ['scripts/install.mjs', ...a], { env, encoding: 'utf8' })
+  install(repo)
+  install(repo)
+  assert.equal(readFileSync(join(repo, '.gitignore'), 'utf8'), '.effort-guard/\n')
+  install(repo, '--uninstall')
+  assert.equal(existsSync(join(repo, '.effort-guard-hooks')), false)
+  install('--user')
+  mkdirSync(join(home, 'effort-guard', 'state', 'abc'), { recursive: true })
+  writeFileSync(join(home, 'effort-guard', 'state', 'abc', 'state.json'), '{}')
+  install('--user', '--uninstall')
+  assert.equal(existsSync(join(home, 'hooks', 'effort-guard.json')), false)
+  assert.equal(existsSync(join(home, 'effort-guard', 'effort-guard.mjs')), false)
+  assert.equal(existsSync(join(home, 'effort-guard', 'state', 'abc', 'state.json')), true)
 })
