@@ -18,7 +18,7 @@ L'evento è letto da `hook_event_name` quando c'è (VS Code), altrimenti dall'ar
 
 Un turno è tutto ciò che accade tra due prompt dell'utente. È faticoso se:
 
-1. un tool fallisce (`resultType: "failure"` o evento di errore);
+1. un tool fallisce (`resultType: "failure"`, `postToolUseFailure`, oppure `errorOccurred` con `errorContext` `tool_execution`: gli errori del modello, di sistema o di input non contano);
 2. un comando shell di test/build (`npm test`, `ng test`, `mvn`, `gradle`, `pytest`, `go test`, `cargo`, `dotnet`, `make`, `tsc`…) stampa un fallimento anche con exit code 0 (`FAIL`, `N failing`, `BUILD FAILURE`…). Comandi come `cat build.log` o `grep FAIL` non contano;
 3. lo stesso comando fallisce due volte nel turno (motivo registrato: `repeated_error`).
 
@@ -39,7 +39,9 @@ Il registro (ultimi 500 turni: ora, esito, motivo, serie) e lo stato del turno s
 
 ## Robustezza
 
-Gli errori dello script finiscono su stderr e non interrompono mai l'agente. I nomi dei campi sono letti in modo tollerante (camelCase e snake_case).
+Gli errori dello script finiscono su stderr e non interrompono mai l'agente. I nomi dei campi sono letti in modo tollerante (camelCase e snake_case) e un BOM all'inizio dello stdin è ignorato.
+
+Lo stato è scritto in modo atomico (file temporaneo e rename) con un lock breve tra processi; un `state.json` illeggibile o di forma sbagliata viene spostato in `state.json.bad` e la valutazione riparte. Il `cwd` del payload, se è una cartella esistente, decide la cartella dello stato (altrimenti quella del processo).
 
 ## Struttura del codice
 

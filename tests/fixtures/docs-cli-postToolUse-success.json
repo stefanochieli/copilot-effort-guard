@@ -1,0 +1,1 @@
+{ "sessionId": "sess-0001", "timestamp": 1760000001000, "cwd": "/work/demo", "toolName": "bash", "toolArgs": "{\"command\":\"npm run ok\"}", "toolResult": { "resultType": "success", "textResultForLlm": "all passed" } }

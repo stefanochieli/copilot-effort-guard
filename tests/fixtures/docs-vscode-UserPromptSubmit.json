@@ -1,0 +1,1 @@
+{ "hook_event_name": "UserPromptSubmit", "session_id": "sess-0002", "timestamp": "2026-11-06T10:00:00.000Z", "cwd": "/work/demo", "prompt": "run the tests" }

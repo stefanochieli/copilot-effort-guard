@@ -1,0 +1,1 @@
+{ "hook_event_name": "PostToolUse", "session_id": "sess-0002", "timestamp": "2026-11-06T10:00:01.000Z", "cwd": "/work/demo", "tool_name": "run_in_terminal", "tool_input": { "command": "npm test" }, "tool_use_id": "call-1", "tool_response": "FAIL src/a.test.js" }

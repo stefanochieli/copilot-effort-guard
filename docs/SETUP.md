@@ -21,7 +21,7 @@ Poi:
 2. **VS Code**: ricarica la finestra (*Developer: Reload Window*) e usa la chat in modalità agente. Se gli hook utente non vengono caricati, aggiungi la cartella nelle impostazioni (il nome esatto va controllato nella pagina *Agent hooks* di VS Code; di solito `chat.hookFilesLocations`) oppure usa l'installazione per repository qui sotto.
 3. Verifica: `node ~/.copilot/effort-guard/effort-guard.mjs doctor` e, in VS Code, *Developer: Show Agent Debug Logs* per vedere se l'hook è stato eseguito.
 
-Disinstallazione: `node scripts/install.mjs --user --uninstall`.
+Disinstallazione: `node scripts/install.mjs --user --uninstall` toglie il codice e il file hook e **lascia** `state/` ed `events.log` (cancella a mano `~/.copilot/effort-guard/` per eliminare anche la cronologia). Non tenere gli hook sia in `~/.copilot/hooks` sia in `.github/hooks` di uno stesso repo: girerebbero due volte per evento (l'installer avvisa; il secondo prompt identico viene comunque scartato).
 
 ## Installazione per repository (team)
 
@@ -29,7 +29,7 @@ Disinstallazione: `node scripts/install.mjs --user --uninstall`.
 node scripts/install.mjs /percorso/del/repo
 ```
 
-Crea `.effort-guard-hooks/` e `.github/hooks/effort-guard.json` nel repository: committali e il team li riceve col normale `git pull`. Lo stato locale è in `.effort-guard/` (già da aggiungere al `.gitignore` del repo).
+Crea `.effort-guard-hooks/` e `.github/hooks/effort-guard.json` nel repository: committali e il team li riceve col normale `git pull`. Lo stato locale è in `.effort-guard/`: l'installer lo aggiunge al `.gitignore` del repo (con `--no-gitignore` non lo fa). Le estensioni per VS Code e IntelliJ leggono solo lo stato dell'installazione utente, non quello di `.effort-guard/`.
 
 ## Configurazione
 
