@@ -17,10 +17,16 @@ import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { looksLikeTestFailure } from './detect.mjs'
 import { formatDoctor, renderBar } from './report.mjs'
+import { redact, clip } from './redact.mjs'
 
 const DEFAULT_THRESHOLD = 3
 const DEFAULT_CALM = 8
 const LOG_LIMIT = 500
+const COMMAND_LIMIT = 200
+const PAYLOAD_LOG_BYTES = 5_000_000
+// State and logs hold commands and paths: readable by the user only (no effect on Windows).
+const DIR_MODE = 0o700
+const FILE_MODE = 0o600
 
 export function pick(obj, ...keys) {
   for (const k of keys) {
@@ -151,11 +157,13 @@ export function onTool(state, payload, { failed: failedEvent = false } = {}) {
     return state
   }
 
-  const repeated = state.turn.struggled && command && state.turn.command === command
+  // What is kept is a short, redacted copy: the full command line can hold a token.
+  const kept = command ? clip(redact(command), COMMAND_LIMIT) : ''
+  const repeated = state.turn.struggled && kept && state.turn.command === kept
 
   return {
     ...state,
-    turn: { struggled: true, reason: repeated ? 'repeated_error' : reason, command: command || state.turn.command },
+    turn: { struggled: true, reason: repeated ? 'repeated_error' : reason, command: kept || state.turn.command },
   }
 }
 
@@ -296,14 +304,14 @@ function load(path) {
 // Written to a temporary file and renamed, so a reader (the IDE extensions) never
 // sees a half-written file.
 function save(path, state) {
-  mkdirSync(dirname(path), { recursive: true })
+  mkdirSync(dirname(path), { recursive: true, mode: DIR_MODE })
   const tmp = `${path}.${process.pid}.tmp`
-  writeFileSync(tmp, JSON.stringify(state))
+  writeFileSync(tmp, JSON.stringify(state), { mode: FILE_MODE })
   try {
     renameSync(tmp, path)
   } catch {
     // Windows can refuse to replace a file another process has open.
-    writeFileSync(path, JSON.stringify(state))
+    writeFileSync(path, JSON.stringify(state), { mode: FILE_MODE })
     rmSync(tmp, { force: true })
   }
 }
@@ -313,7 +321,7 @@ function save(path, state) {
 // carries on without the lock.
 function withLock(path, fn) {
   const lock = `${path}.lock`
-  mkdirSync(dirname(path), { recursive: true })
+  mkdirSync(dirname(path), { recursive: true, mode: DIR_MODE })
   let held = false
   for (let i = 0; i < 75 && !held; i++) {
     try {
@@ -352,10 +360,10 @@ function logEvent(event, payload, state, now = new Date()) {
   const { id, source } = readSession(payload)
   const dir = homeDir()
   const path = join(dir, 'events.log')
-  mkdirSync(dir, { recursive: true })
+  mkdirSync(dir, { recursive: true, mode: DIR_MODE })
   const { tool } = readTool(payload)
   const line = `${now.toISOString()} ${event}${tool ? ` tool=${tool}` : ''} struggled=${state.turn.struggled} streak=${state.streak} session=${id} src=${source} cwd=${activeCwd}\n`
-  appendFileSync(path, line)
+  appendFileSync(path, line, { mode: FILE_MODE })
   try {
     if (statSync(path).size > 200_000) {
       writeFileSync(path, readFileSync(path, 'utf8').split('\n').slice(-500).join('\n'))
@@ -371,14 +379,28 @@ function lastEvents(n) {
   }
 }
 
+// Payloads are redacted (tokens, passwords, Authorization headers) unless the
+// variable is exactly "raw", and the file is rotated so it cannot grow without limit.
 function debugDump(event, payload, input = {}) {
-  if (!process.env.EFFORT_GUARD_DEBUG) {
+  const mode = process.env.EFFORT_GUARD_DEBUG
+  if (!mode) {
     return
   }
-  mkdirSync(stateDir(), { recursive: true })
+  const dir = stateDir()
+  mkdirSync(dir, { recursive: true, mode: DIR_MODE })
+  const path = join(dir, 'payloads.jsonl')
   // When stdin was not valid JSON the raw text is kept too, so the capture shows why.
   const extra = input.error ? { stdinError: input.error, stdinRaw: String(input.raw).slice(0, 4000) } : {}
-  appendFileSync(join(stateDir(), 'payloads.jsonl'), JSON.stringify({ ts: new Date().toISOString(), event, payload, ...extra }) + '\n')
+  let line = JSON.stringify({ ts: new Date().toISOString(), event, payload, ...extra })
+  if (mode !== 'raw') {
+    line = redact(line)
+  }
+  appendFileSync(path, line + '\n', { mode: FILE_MODE })
+  try {
+    if (statSync(path).size > PAYLOAD_LOG_BYTES) {
+      writeFileSync(path, readFileSync(path, 'utf8').split('\n').slice(-1000).join('\n'), { mode: FILE_MODE })
+    }
+  } catch {}
 }
 
 // Output understood by VS Code agent hooks (common output format plus
@@ -495,6 +517,7 @@ function doctor() {
       nodeVersion: process.version,
       hooksFile,
       hooksFound: existsSync(hooksFile),
+      duplicateHooks: existsSync(hooksFile) && existsSync(join(activeCwd, '.github', 'hooks', 'effort-guard.json')) ? join(activeCwd, '.github', 'hooks', 'effort-guard.json') : null,
       stateDir: dir,
       stateExists: existsSync(dir),
       threshold: Math.max(1, Math.floor(Number(process.env.EFFORT_GUARD_THRESHOLD)) || DEFAULT_THRESHOLD),

@@ -29,7 +29,8 @@ const hooksDir = user ? join(base, 'hooks') : join(base, '.github', 'hooks')
 const entry = user ? join(codeDir, 'effort-guard.mjs') : '.effort-guard-hooks/effort-guard.mjs'
 const cmd = event => `node "${entry}" ${event}`
 
-const CODE_FILES = ['effort-guard.mjs', 'detect.mjs', 'report.mjs', 'package.json']
+const SRC_FILES = ['effort-guard.mjs', 'detect.mjs', 'report.mjs', 'redact.mjs']
+const CODE_FILES = [...SRC_FILES, 'package.json']
 
 if (uninstall) {
   // Only what the installer wrote: for --user the state/ folders and events.log live
@@ -48,7 +49,7 @@ if (uninstall) {
 
 mkdirSync(codeDir, { recursive: true })
 mkdirSync(hooksDir, { recursive: true })
-for (const f of ['effort-guard.mjs', 'detect.mjs', 'report.mjs']) {
+for (const f of SRC_FILES) {
   copyFileSync(join(root, 'src', f), join(codeDir, f))
 }
 // The copied files are ES modules even when the host repo is not.

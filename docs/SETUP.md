@@ -40,7 +40,7 @@ Variabili d'ambiente (nel profilo della shell o nelle impostazioni dell'ambiente
 | `EFFORT_GUARD_THRESHOLD` | `3` | Turni faticosi consecutivi prima dell'avviso |
 | `EFFORT_GUARD_CALM` | `8` | Turni puliti di fila dopo i quali suggerisce un modello più leggero (task probabilmente semplice) |
 | `EFFORT_GUARD_DIR` | vedi sopra | Cartella dello stato |
-| `EFFORT_GUARD_DEBUG` | spento | Con `1` salva i payload grezzi in `payloads.jsonl` |
+| `EFFORT_GUARD_DEBUG` | spento | Con `1` salva i payload in `payloads.jsonl` con i segreti oscurati; con `raw` senza oscuramento |
 
 ## Comandi utili
 

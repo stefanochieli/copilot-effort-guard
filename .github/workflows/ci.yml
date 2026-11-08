@@ -29,6 +29,24 @@ jobs:
       - name: Selftest
         run: node src/effort-guard.mjs selftest
 
+  # The hooks run on Windows too (PowerShell, backslash paths, Node installed by the MSI):
+  # the same tests on windows-latest, on the Node versions the package declares (>=20).
+  # Not a required check: the required one is `checks` above.
+  windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm test
+      - name: Selftest
+        run: node src/effort-guard.mjs selftest
+
   # Builds and tests the IntelliJ plugin (needs the IntelliJ Platform, downloaded by Gradle).
   intellij-plugin:
     runs-on: ubuntu-latest

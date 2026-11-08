@@ -69,6 +69,9 @@ export function formatDoctor(info, now = new Date()) {
   out.push(`  ${ok} node ${info.nodeVersion}`)
   out.push(info.hooksFound ? `  ${ok} hooks file found` : `  ${bad} hooks file MISSING: run scripts/install.mjs --user`)
   out.push(`        ${info.hooksFile}`)
+  if (info.duplicateHooks) {
+    out.push(`  ${bad} hooks registered twice (user file and ${info.duplicateHooks}): each event runs two times; remove one of them`)
+  }
   out.push(`  ${ok} threshold: ${info.threshold} struggling turns in a row`)
   out.push(`  ${info.debug ? ok : '    '} payload dump ${info.debug ? 'on' : 'off (set EFFORT_GUARD_DEBUG=1 to enable)'}`)
   out.push(`        state for this folder: ${info.stateDir} (${info.stateExists ? 'exists' : 'not created yet'})`)

@@ -45,3 +45,21 @@ test('npm variants: npm.cmd on Windows, npm t, flags before the script', () => {
     assert.equal(isTestCommand(cmd), true, cmd)
   }
 })
+
+test('wrappers before the package manager are skipped, other words are not', () => {
+  for (const cmd of ['sudo npm test', 'CI=1 npm run build', 'env CI=1 npm test', 'time pnpm -r test', 'npm --prefix web test']) {
+    assert.equal(isTestCommand(cmd), true, cmd)
+  }
+  for (const cmd of ['echo npm test', 'npm install test', 'npm install', 'npm config set test 1']) {
+    assert.equal(isTestCommand(cmd), false, cmd)
+  }
+})
+
+test('pathological command lines are scanned in linear time (no regex backtracking)', () => {
+  const started = Date.now()
+  for (const cmd of ['npm ' + '--a '.repeat(5000) + 'zzz', 'npm ' + '--a=b '.repeat(5000) + 'x', 'npm ' + '-a x '.repeat(5000), 'a'.repeat(100000) + ' mvn']) {
+    isTestCommand(cmd)
+  }
+  looksLikeTestFailure('npm test', 'x'.repeat(2_000_000))
+  assert.ok(Date.now() - started < 1000, `took ${Date.now() - started} ms`)
+})

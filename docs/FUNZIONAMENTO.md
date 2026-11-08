@@ -35,7 +35,7 @@ Il testo suggerisce di cambiare modello o aumentare l'effort; il cambio lo fai t
 
 ## Stato e privacy
 
-Il registro (ultimi 500 turni: ora, esito, motivo, serie) e lo stato del turno sono in un file `state.json` locale. Nulla viene inviato all'esterno. Il dump opzionale `payloads.jsonl` contiene comandi e output dei tool: non condividerlo senza controllarlo.
+Il registro (ultimi 500 turni: ora, esito, motivo, serie) e lo stato del turno sono in un file `state.json` locale. Nulla viene inviato all'esterno. Il comando salvato nello stato è una copia breve (200 caratteri) con i segreti oscurati (`ghp_…`, `password=…`, `--token x`, `Authorization: Bearer …`, JWT). Il dump opzionale `payloads.jsonl` contiene comandi e output dei tool, con la stessa oscuratura salvo `EFFORT_GUARD_DEBUG=raw`, ed è ruotato oltre 5 MB; l'oscuratura è per pattern, quindi non condividere il file senza controllarlo. Stato, log e dump sono leggibili solo dal tuo utente (permessi 700/600; su Windows valgono i permessi della cartella utente). Il controllo dei comandi di test lavora su token e su una coda limitata dell'output, senza espressioni regolari annidate: una riga lunghissima non può bloccare l'hook.
 
 ## Robustezza
 

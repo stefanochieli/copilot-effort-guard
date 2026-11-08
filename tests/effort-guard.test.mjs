@@ -368,3 +368,9 @@ test('installer: repo install ignores the state in git, uninstall keeps the user
   assert.equal(existsSync(join(home, 'effort-guard', 'effort-guard.mjs')), false)
   assert.equal(existsSync(join(home, 'effort-guard', 'state', 'abc', 'state.json')), true)
 })
+
+test('doctor flags the hooks registered both as user file and in the repository', () => {
+  const base = { nodeVersion: 'v22', hooksFile: '/h/effort-guard.json', hooksFound: true, stateDir: '/s', stateExists: true, threshold: 3, debug: false, events: [], projects: [] }
+  assert.match(formatDoctor({ ...base, duplicateHooks: '/repo/.github/hooks/effort-guard.json' }), /\[!!\] hooks registered twice/)
+  assert.doesNotMatch(formatDoctor({ ...base, duplicateHooks: null }), /registered twice/)
+})
