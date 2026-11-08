@@ -9,7 +9,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test \"tests/*.test.mjs\"",
+    "test": "node --test",
     "summary": "node src/effort-guard.mjs summary"
   }
 }
