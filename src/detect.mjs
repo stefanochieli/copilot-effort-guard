@@ -2,8 +2,10 @@
 // Anything else (cat, grep, git log...) can print "FAIL" without meaning it.
 const TEST_COMMAND = new RegExp(
   [
-    String.raw`(?:^|[\s;&|(])(?:\./)?(?:mvnw?|gradlew?|jest|vitest|karma|pytest|tox|tsc|make)(?=\s|$)`,
-    String.raw`\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|check|build|lint|e2e)\b`,
+    String.raw`(?:^|[\s;&|(])(?:\./)?(?:mvnw?|gradlew?)(?:\.cmd|\.bat)?(?=\s|$)`,
+    String.raw`(?:^|[\s;&|(])(?:\./)?(?:jest|vitest|karma|pytest|tox|tsc|make)(?=\s|$)`,
+    // flags between the tool and the verb (`pnpm -r test`), `npm t`, Windows `npm.cmd`
+    String.raw`\b(?:npm|pnpm|yarn|bun)(?:\.cmd)?(?:\s+-{1,2}[\w-]+(?:=\S+)?)*\s+(?:run\s+)?(?:test|t|check|build|lint|e2e)\b`,
     String.raw`\bng\s+(?:test|build|lint|e2e)\b`,
     String.raw`\b(?:go|cargo|dotnet)\s+(?:test|build)\b`,
   ].join('|'),
@@ -13,8 +15,12 @@ const TEST_COMMAND = new RegExp(
 // (`npm test || true`) or the failure is reported without a non-zero exit.
 const FAILURE_PATTERNS = [
   /\bFAIL(ED|URE)?\b/,
-  /\d+\s+failing/i,
-  /tests?:\s*\d+\s*failed/i,
+  /\b[1-9]\d*\s+failing/i,
+  // "N failed" with N > 0 (Jest, Vitest, pytest, Gradle); "0 failed" is a green run
+  /\b[1-9]\d*\s+failed\b/i,
+  /\bFailures:\s*[1-9]/i, // Maven surefire
+  /\bErrors:\s*[1-9]/i,
+  /\berror TS\d+/i, // tsc
   /assertionerror/i,
   /BUILD FAILURE/i,
   /[✗✖]/,

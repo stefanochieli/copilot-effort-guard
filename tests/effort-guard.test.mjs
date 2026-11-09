@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { emptyState, onTool, closeTurn, summary, readTool, resetState, touchSession } from '../src/effort-guard.mjs'
+import { emptyState, onTool, closeTurn, summary, readTool, resetState, touchSession, validState, parseStdin, isUnder, save, withLock } from '../src/effort-guard.mjs'
 
 const failingTest = { toolName: 'bash', toolArgs: { command: 'npm test' }, toolResult: { textResultForLlm: '2 failing' } }
 
@@ -53,7 +53,7 @@ test('a postToolUse result with resultType "failure" counts as a tool error', ()
 
 import { normaliseEvent, run, warningOutput } from '../src/effort-guard.mjs'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, existsSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -249,4 +249,56 @@ test('resetState clears streaks but keeps the log; touchSession keeps the latest
   list = touchSession(list, { source: 'vscode-chat', id: 'b' })
   list = touchSession(list, { source: 'cli', id: 'a' })
   assert.deepEqual(list.map(x => x.id), ['a', 'b'])
+})
+
+test('errorOccurred from a model call does not count, one from a tool does', () => {
+  const model = { errorContext: 'model_call', recoverable: true, error: { message: 'rate limit' } }
+  assert.equal(onTool(emptyState(), model, { failed: true }).turn.struggled, false)
+  assert.equal(onTool(emptyState(), { errorContext: 'tool_execution' }, { failed: true }).turn.struggled, true)
+  assert.equal(onTool(emptyState(), {}, { failed: true }).turn.struggled, true) // no context: keep counting
+})
+
+test('the same prompt delivered twice closes the turn only once', () => {
+  const prompt = { sessionId: 's1', timestamp: 1700000000000, prompt: 'go' }
+  let state = emptyState()
+  for (let i = 0; i < 3; i++) {
+    state = run('prompt', prompt, state, 3, new Date(), 8).state
+    state = run('tool', { toolName: 'bash', toolArgs: { command: 'npm test' }, toolResult: { textResultForLlm: '2 failing' } }, state, 3).state
+    // second registration of the same hook fires for the same prompt
+    state = run('prompt', prompt, state, 3).state
+    prompt.timestamp += 1000
+  }
+  assert.equal(state.streak, 2)
+})
+
+test('a failure warning carries the real event name', () => {
+  const state = { ...emptyState(), pendingWarning: 'w' }
+  assert.equal(run('failure', {}, state, 3).stdout.hookSpecificOutput.hookEventName, 'PostToolUseFailure')
+  assert.equal(run('tool', {}, state, 3).stdout.hookSpecificOutput.hookEventName, 'PostToolUse')
+})
+
+test('validState rejects shapes that would throw on every hook', () => {
+  assert.equal(validState(emptyState()), true)
+  assert.equal(validState({ turn: null, log: [], streak: 0 }), false)
+  assert.equal(validState({ turn: {}, log: 'x', streak: 0 }), false)
+})
+
+test('parseStdin strips a UTF-8 BOM and reports bad JSON', () => {
+  assert.deepEqual(parseStdin('﻿{"a":1}').payload, { a: 1 })
+  assert.equal(parseStdin('{oops').error !== undefined, true)
+})
+
+test('isUnder compares whole path segments, case-insensitive on Windows', () => {
+  assert.equal(isUnder('/home/u/.copilot2/x.mjs', '/home/u/.copilot', 'linux'), false)
+  assert.equal(isUnder('/home/u/.copilot/x.mjs', '/home/u/.copilot', 'linux'), true)
+})
+
+test('save is atomic and withLock serialises, releasing the lock', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'eg-'))
+  const path = join(dir, 'state.json')
+  withLock(path, () => save(path, emptyState()))
+  assert.equal(validState(JSON.parse(readFileSync(path, 'utf8'))), true)
+  assert.equal(existsSync(`${path}.lock`), false)
+  assert.deepEqual(readdirSync(dir), ['state.json'])
+  rmSync(dir, { recursive: true, force: true })
 })

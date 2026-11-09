@@ -58,7 +58,9 @@ function resetProject(dir, now = new Date()) {
     started: true,
     resetAt: now.toISOString(),
   }
-  fs.writeFileSync(file, JSON.stringify(next))
+  const tmp = `${file}.${process.pid}.ext.tmp`
+  fs.writeFileSync(tmp, JSON.stringify(next))
+  fs.renameSync(tmp, file) // atomic: the hooks never read a half-written file
   return next
 }
 

@@ -29,9 +29,16 @@ const entry = user ? join(codeDir, 'effort-guard.mjs') : '.effort-guard-hooks/ef
 const cmd = event => `node "${entry}" ${event}`
 
 if (uninstall) {
-  rmSync(codeDir, { recursive: true, force: true })
+  // Per-user installs keep state/ and events.log inside codeDir: delete only the code.
+  const code = ['effort-guard.mjs', 'detect.mjs', 'report.mjs', 'package.json']
+  for (const f of code) {
+    rmSync(join(codeDir, f), { force: true })
+  }
+  if (!user) {
+    rmSync(codeDir, { recursive: true, force: true })
+  }
   rmSync(join(hooksDir, 'effort-guard.json'), { force: true })
-  console.log(`removed: ${codeDir} and ${join(hooksDir, 'effort-guard.json')} (state in .effort-guard/ is left in place)`)
+  console.log(`removed: the hook code in ${codeDir} and ${join(hooksDir, 'effort-guard.json')}. State and events.log are left in place${user ? ` (${codeDir})` : ' (.effort-guard/)'}.`)
   process.exit(0)
 }
 
@@ -58,5 +65,5 @@ console.log(`installed: ${codeDir}\nconfig:    ${join(hooksDir, 'effort-guard.js
 if (user) {
   console.log('\nNext: restart Copilot CLI / reload VS Code, then check it with:')
   console.log(`  node "${entry}" doctor`)
-  console.log('State is kept per working directory in .effort-guard/ (set EFFORT_GUARD_DIR to share one folder).')
+  console.log(`State is kept per working directory under ${codeDir}/state/ (set EFFORT_GUARD_DIR to share one folder).`)
 }
