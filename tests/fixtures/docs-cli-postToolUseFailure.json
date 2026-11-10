@@ -1,0 +1,1 @@
+{ "sessionId": "sess-0001", "timestamp": 1760000002000, "cwd": "/work/demo", "toolName": "bash", "toolArgs": "{\"command\":\"npm test\"}", "error": "command failed" }
