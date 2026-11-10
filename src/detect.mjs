@@ -69,3 +69,27 @@ export function looksLikeTestFailure(command, text) {
   const tail = text.length > MAX_TEXT ? text.slice(-MAX_TEXT) : text
   return FAILURE_PATTERNS.some(re => re.test(tail))
 }
+
+// Exit code of a shell tool: structured fields first, then the text some hosts append
+// ("exited with exit code 1", "Exit code: 1"). null when nothing says. Field names are
+// not confirmed for Copilot yet: `effort-guard payloads` shows what really arrives.
+export function exitCodeOf(result, text = '') {
+  for (const k of ['exitCode', 'exit_code', 'returnCode', 'return_code']) {
+    const v = result?.[k]
+    if (Number.isInteger(v) || (typeof v === 'string' && /^-?\d+$/.test(v))) {
+      return Number(v)
+    }
+  }
+  const m = /\bexit(?:ed)?(?: with)?(?: exit)? code[:=]?\s*(-?\d+)/i.exec(String(text).slice(-MAX_TEXT))
+  return m ? Number(m[1]) : null
+}
+
+// Commands whose non-zero exit is an answer, not a failure (no match, files differ...).
+export function ignoresExitCode(command) {
+  return /^\s*(?:(?:\.\/)?(?:grep|egrep|rg|diff|cmp|test|findstr|where|which)\b|\[|git\s+(?:diff|grep)\b)/.test(String(command ?? '').slice(0, MAX_COMMAND))
+}
+
+// A test/build command that ended clean: exit 0 (or unknown) and no failure text.
+export function isTestSuccess(command, text, exitCode = null) {
+  return isTestCommand(command) && (exitCode === null || exitCode === 0) && !looksLikeTestFailure(command, text)
+}

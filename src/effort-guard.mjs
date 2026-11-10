@@ -15,7 +15,7 @@ import { dirname, join, relative, isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
-import { looksLikeTestFailure } from './detect.mjs'
+import { looksLikeTestFailure, isTestCommand, isTestSuccess, exitCodeOf, ignoresExitCode } from './detect.mjs'
 import { formatDoctor, renderBar } from './report.mjs'
 import { redact, clip } from './redact.mjs'
 
@@ -104,6 +104,8 @@ export function normaliseEvent(name) {
       return 'watch'
     case 'reset':
       return 'reset'
+    case 'payloads':
+      return 'payloads'
     default:
       return null
   }
@@ -151,9 +153,17 @@ export function onTool(state, payload, { failed: failedEvent = false } = {}) {
     return state
   }
 
-  const reason = failed ? 'tool_error' : looksLikeTestFailure(command, text) ? 'test_failure_pattern' : null
+  const result = pick(payload, 'toolResult', 'tool_response', 'toolResponse', 'tool_result')
+  const exitCode = isShell ? exitCodeOf(result && typeof result === 'object' ? result : {}, text) : null
+  const badExit = exitCode !== null && exitCode !== 0 && !ignoresExitCode(command)
+  const reason = failed ? 'tool_error' : looksLikeTestFailure(command, text) ? 'test_failure_pattern' : badExit ? 'exit_code' : null
 
   if (!reason) {
+    // Red then green in the same turn (TDD, or a fix that worked) is not a struggle.
+    // EFFORT_GUARD_RED_GREEN=0 turns this off.
+    if (state.turn.struggled && state.turn.test && isShell && process.env.EFFORT_GUARD_RED_GREEN !== '0' && isTestSuccess(command, text, exitCode)) {
+      return { ...state, turn: { struggled: false, reason: null, command: null } }
+    }
     return state
   }
 
@@ -163,7 +173,8 @@ export function onTool(state, payload, { failed: failedEvent = false } = {}) {
 
   return {
     ...state,
-    turn: { struggled: true, reason: repeated ? 'repeated_error' : reason, command: kept || state.turn.command },
+    // `test`: the struggle came from a test/build command, so a later green run of one clears it.
+    turn: { struggled: true, reason: repeated ? 'repeated_error' : reason, command: kept || state.turn.command, test: isTestCommand(command) || (state.turn.struggled && state.turn.test) || undefined },
   }
 }
 
@@ -480,6 +491,45 @@ function selftest() {
   process.exitCode = out.length === 1 ? 0 : 1
 }
 
+// Shape of the captured payloads (EFFORT_GUARD_DEBUG=1), without values: event names,
+// keys, value types, tool names, result shapes, exit-code fields. Safe to share.
+export function summarisePayloads(lines) {
+  const kind = v => (v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v)
+  const groups = new Map()
+  for (const line of lines) {
+    let rec
+    try {
+      rec = JSON.parse(line)
+    } catch {
+      continue
+    }
+    const p = rec.payload ?? {}
+    const keys = Object.keys(p).sort().map(k => `${k}:${kind(p[k])}`).join(', ')
+    const { tool, resultType, text } = readTool(p)
+    const result = pick(p, 'toolResult', 'tool_response', 'toolResponse', 'tool_result')
+    const resultKeys = result && typeof result === 'object' ? Object.keys(result).sort().join(', ') : result === undefined ? '' : `(${kind(result)})`
+    const args = pick(p, 'toolArgs', 'tool_input', 'toolInput')
+    const argKeys = args && typeof args === 'object' ? Object.keys(args).sort().join(', ') : typeof args === 'string' ? `(string) ${Object.keys(safeJson(args)).sort().join(', ')}` : ''
+    const exitCode = tool ? exitCodeOf(result && typeof result === 'object' ? result : {}, text) : null
+    const g = { event: rec.event, keys, tool, argKeys, resultKeys, resultType: resultType ?? '', exitCode, parseError: rec.stdinError ?? '' }
+    const id = JSON.stringify(g)
+    groups.set(id, { ...g, count: (groups.get(id)?.count ?? 0) + 1 })
+  }
+  return [...groups.values()].sort((a, b) => b.count - a.count)
+}
+
+function payloads() {
+  let lines = []
+  try {
+    lines = readFileSync(join(stateDir(), 'payloads.jsonl'), 'utf8').trim().split('\n')
+  } catch {
+    return console.log('effort-guard: no payloads.jsonl here. Start Copilot with EFFORT_GUARD_DEBUG=1 first.')
+  }
+  for (const g of summarisePayloads(lines)) {
+    console.log(`${g.count}x ${g.event}${g.tool ? ` tool=${g.tool}` : ''}\n   payload keys: ${g.keys}\n   tool args keys: ${g.argKeys || '-'}\n   result keys: ${g.resultKeys || '-'} resultType=${g.resultType || '-'} exitCode=${g.exitCode ?? '-'}${g.parseError ? `\n   STDIN ERROR: ${g.parseError}` : ''}`)
+  }
+}
+
 function projectStates() {
   const root = join(homeDir(), 'state')
   try {
@@ -595,6 +645,9 @@ function main() {
   }
   if (arg === 'reset') {
     return reset()
+  }
+  if (arg === 'payloads') {
+    return payloads()
   }
   if (arg === 'summary') {
     return console.log(summary(load(statePath())))

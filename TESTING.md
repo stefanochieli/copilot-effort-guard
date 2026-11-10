@@ -18,6 +18,7 @@ Per un repository (condiviso col team via git): `node scripts/install.mjs <carte
 1. Avvia Copilot con `EFFORT_GUARD_DEBUG=1` (PowerShell: `$env:EFFORT_GUARD_DEBUG=1`) e `EFFORT_GUARD_THRESHOLD=1`.
 2. Chiedi all'agente di eseguire un comando di test che fallisce (es. `npm test` su un test rotto) e poi mandagli un altro messaggio.
 3. `node <percorso>/effort-guard.mjs doctor` mostra il riepilogo; `.effort-guard/payloads.jsonl` contiene i payload grezzi di ogni evento.
+   Più comodo: `node <percorso>/effort-guard.mjs payloads` stampa solo la forma dei payload (eventi, chiavi, tipi, campi dell'exit code), senza comandi né output: si può incollare in una issue.
 4. Se un evento non compare in `payloads.jsonl`, quell'host non lo invia: segnalalo con una issue allegando il file (senza dati sensibili: contiene comandi e output dei tool).
 
 `EFFORT_GUARD_DEBUG=1` oscura token e password nei payload salvati (basta per catturare i nomi dei campi); usa `raw` solo se serve il testo esatto e poi non condividere il file. Con `EFFORT_GUARD_DEBUG=1`, se lo stdin non è JSON valido, `payloads.jsonl` conserva anche il testo grezzo (`stdinRaw`) e l'errore (`stdinError`). Le fixture in `tests/fixtures/` sono costruite a mano dagli schemi documentati: dopo la cattura vanno sostituite con i payload reali anonimizzati.

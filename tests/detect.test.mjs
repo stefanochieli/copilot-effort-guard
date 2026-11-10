@@ -63,3 +63,25 @@ test('pathological command lines are scanned in linear time (no regex backtracki
   looksLikeTestFailure('npm test', 'x'.repeat(2_000_000))
   assert.ok(Date.now() - started < 1000, `took ${Date.now() - started} ms`)
 })
+
+import { exitCodeOf, ignoresExitCode, isTestSuccess } from '../src/detect.mjs'
+
+test('reads the exit code from fields or from the text', () => {
+  assert.equal(exitCodeOf({ exitCode: 2 }), 2)
+  assert.equal(exitCodeOf({ exit_code: '1' }), 1)
+  assert.equal(exitCodeOf({}, 'oops\n<exited with exit code 127>'), 127)
+  assert.equal(exitCodeOf({}, 'Exit code: 0'), 0)
+  assert.equal(exitCodeOf({}, 'nothing here'), null)
+})
+
+test('commands where a non-zero exit is an answer are ignored', () => {
+  for (const c of ['grep foo a.txt', 'git diff --exit-code', 'rg x', 'diff a b', 'test -f x']) assert.equal(ignoresExitCode(c), true, c)
+  assert.equal(ignoresExitCode('ls /nope'), false)
+})
+
+test('a clean test run is a success, a failing one is not', () => {
+  assert.equal(isTestSuccess('npm test', '12 passing', 0), true)
+  assert.equal(isTestSuccess('npm test', '2 failing', null), false)
+  assert.equal(isTestSuccess('npm test', 'ok', 1), false)
+  assert.equal(isTestSuccess('ls', 'ok', 0), false)
+})

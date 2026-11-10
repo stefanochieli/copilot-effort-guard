@@ -4,7 +4,7 @@ Hook per **GitHub Copilot** (Copilot CLI e agent hooks di VS Code) che osserva i
 
 ## Come funziona
 
-- **Turno faticoso**: un tool fallito (`postToolUseFailure` o `resultType: "failure"`), un comando di test/build (`npm test`, `ng test`, `mvn`, `gradle`, `pytest`, `go test`…) il cui output contiene un fallimento anche con exit code 0, oppure lo stesso comando fallito due volte nel turno.
+- **Turno faticoso**: un tool fallito (`postToolUseFailure` o `resultType: "failure"`), un comando di test/build (`npm test`, `ng test`, `mvn`, `gradle`, `pytest`, `go test`…) il cui output contiene un fallimento anche con exit code 0, un comando shell con exit code diverso da 0 (letto da `exitCode`/`exit_code` o dal testo "exit code N"; ignorato per `grep`, `diff`, `test`…), oppure lo stesso comando fallito due volte nel turno. Se nello stesso turno un comando di test/build riesce dopo un fallimento (rosso poi verde) il turno non conta come faticoso (`EFFORT_GUARD_RED_GREEN=0` lo disattiva).
 - **Escalation**: alla soglia (default 3) l'avviso va su stderr e viene offerto all'agente come `additionalContext`. Un turno pulito azzera la serie.
 - **Stato**: `.effort-guard/state.json` (l'installazione per repository aggiunge `.effort-guard/` al `.gitignore` del repo, salvo `--no-gitignore`); cartella cambiabile con `EFFORT_GUARD_DIR`, soglia con `EFFORT_GUARD_THRESHOLD`.
 - `npm run summary` stampa il riepilogo dei turni.
@@ -13,7 +13,7 @@ Hook per **GitHub Copilot** (Copilot CLI e agent hooks di VS Code) che osserva i
 
 Documentazione: [setup](docs/SETUP.md), [funzionamento](docs/FUNZIONAMENTO.md), [prove sul tuo Copilot](TESTING.md). In breve: `node scripts/install.mjs --user` (globale, CLI e VS Code) oppure `node scripts/install.mjs <repo>` (team).
 
-Barra nella status bar di VS Code: estensione in [`vscode-extension/`](vscode-extension/README.md). Lo stesso indicatore per IntelliJ IDEA e gli altri IDE JetBrains: plugin in [`intellij-plugin/`](intellij-plugin/README.md). Comandi: `summary`, `doctor` (report leggibile: setup, ultime chiamate, avvisi, tabella dei progetti), `selftest` (verifica locale senza Copilot), `reset` (azzera le serie dopo aver cambiato modello o thinking; nell'estensione c'è il pulsante *Reset* nel pannello e il comando *Effort Guard: Reset…*). Opzioni via ambiente: `EFFORT_GUARD_THRESHOLD`, `EFFORT_GUARD_DIR`, `EFFORT_GUARD_DEBUG=1` (salva i payload di ogni evento, con segreti oscurati: token, password, header Authorization; `raw` li salva senza oscuramento).
+Barra nella status bar di VS Code: estensione in [`vscode-extension/`](vscode-extension/README.md). Lo stesso indicatore per IntelliJ IDEA e gli altri IDE JetBrains: plugin in [`intellij-plugin/`](intellij-plugin/README.md). Comandi: `summary`, `doctor` (report leggibile: setup, ultime chiamate, avvisi, tabella dei progetti), `selftest` (verifica locale senza Copilot), `payloads` (riassunto dei payload catturati con `EFFORT_GUARD_DEBUG=1`: solo nomi di campi e tipi, nessun valore), `reset` (azzera le serie dopo aver cambiato modello o thinking; nell'estensione c'è il pulsante *Reset* nel pannello e il comando *Effort Guard: Reset…*). Opzioni via ambiente: `EFFORT_GUARD_THRESHOLD`, `EFFORT_GUARD_DIR`, `EFFORT_GUARD_DEBUG=1` (salva i payload di ogni evento, con segreti oscurati: token, password, header Authorization; `raw` li salva senza oscuramento).
 
 ## Limiti
 
