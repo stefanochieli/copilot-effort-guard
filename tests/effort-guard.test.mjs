@@ -374,3 +374,37 @@ test('doctor flags the hooks registered both as user file and in the repository'
   assert.match(formatDoctor({ ...base, duplicateHooks: '/repo/.github/hooks/effort-guard.json' }), /\[!!\] hooks registered twice/)
   assert.doesNotMatch(formatDoctor({ ...base, duplicateHooks: null }), /registered twice/)
 })
+
+import { summarisePayloads } from '../src/effort-guard.mjs'
+
+test('a shell command with a non-zero exit code is a struggle, except grep-like commands', () => {
+  const ls = { toolName: 'powershell', toolArgs: { command: 'ls C:\\nope' }, toolResult: { resultType: 'success', textResultForLlm: 'not found\n<exited with exit code 2>' } }
+  assert.equal(onTool(emptyState(), ls).turn.reason, 'exit_code')
+  const grep = { toolName: 'bash', toolArgs: { command: 'grep x f' }, toolResult: { textResultForLlm: '<exited with exit code 1>' } }
+  assert.equal(onTool(emptyState(), grep).turn.struggled, false)
+  assert.equal(onTool(emptyState(), { toolName: 'bash', toolArgs: { command: 'make' }, toolResult: { exitCode: 0, textResultForLlm: 'ok' } }).turn.struggled, false)
+})
+
+test('red then green test run in the same turn is not a struggle (EFFORT_GUARD_RED_GREEN=0 disables)', () => {
+  const red = { toolName: 'bash', toolArgs: { command: 'npm test' }, toolResult: { textResultForLlm: '2 failing' } }
+  const green = { toolName: 'bash', toolArgs: { command: 'npm test' }, toolResult: { textResultForLlm: '12 passing' } }
+  let s = onTool(onTool(emptyState(), red), green)
+  assert.equal(s.turn.struggled, false)
+  // a tool error that is not a test is not cleared by a green test
+  s = onTool(onTool(emptyState(), { toolName: 'edit', toolResult: { resultType: 'failure' } }), green)
+  assert.equal(s.turn.struggled, true)
+  process.env.EFFORT_GUARD_RED_GREEN = '0'
+  try {
+    assert.equal(onTool(onTool(emptyState(), red), green).turn.struggled, true)
+  } finally {
+    delete process.env.EFFORT_GUARD_RED_GREEN
+  }
+})
+
+test('summarisePayloads reports shapes, not values', () => {
+  const line = JSON.stringify({ event: 'tool', payload: { toolName: 'bash', toolArgs: '{"command":"secret"}', toolResult: { resultType: 'success', textResultForLlm: 'x' } } })
+  const [g] = summarisePayloads([line, line])
+  assert.equal(g.count, 2)
+  assert.match(g.argKeys, /command/)
+  assert.equal(JSON.stringify(g).includes('secret'), false)
+})
