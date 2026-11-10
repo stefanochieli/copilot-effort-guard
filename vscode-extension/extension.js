@@ -17,7 +17,7 @@ function settings() {
 function refresh() {
   const { home, threshold, notify } = settings()
   const folders = (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath)
-  const found = lib.findState(lib.readProjects(home), folders)
+  const found = lib.findState(lib.readProjects(home, folders), folders)
   const state = found?.state ?? null
   currentDir = found?.dir ?? null
   const view = lib.computeView(state, threshold)
@@ -85,16 +85,36 @@ function activate(context) {
     vscode.commands.registerCommand('effortGuard.reset', resetEvaluation),
     vscode.commands.registerCommand('effortGuard.showReport', () => {
       channel.clear()
-      channel.appendLine(lib.formatReport(lib.readProjects(settings().home)))
+      channel.appendLine(lib.formatReport(lib.readProjects(settings().home, (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath))))
       channel.show(true)
     }),
     vscode.workspace.onDidChangeConfiguration(e => e.affectsConfiguration('effortGuard') && refresh()),
     vscode.workspace.onDidChangeWorkspaceFolders(refresh),
   )
 
+  // Instant refresh when a hook writes the state; the timer stays as a fallback
+  // (watchers outside the workspace are not guaranteed on every platform).
+  let pending = null
+  const soon = () => {
+    clearTimeout(pending)
+    pending = setTimeout(refresh, 150)
+  }
+  const watchers = [
+    vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(settings().home), 'effort-guard/state/*/state.json')),
+    vscode.workspace.createFileSystemWatcher('**/.effort-guard/state.json'),
+  ]
+  for (const w of watchers) {
+    context.subscriptions.push(w, w.onDidChange(soon), w.onDidCreate(soon))
+  }
+  // A window in the background is refreshed less often; focus brings it up to date.
+  context.subscriptions.push(vscode.window.onDidChangeWindowState(e => e.focused && refresh()))
+
   refresh()
-  timer = setInterval(refresh, 2000)
-  context.subscriptions.push({ dispose: () => clearInterval(timer) })
+  timer = setInterval(() => {
+    if (vscode.window.state.focused || panel?.visible) refresh()
+  }, 2000)
+  const slow = setInterval(refresh, 15000)
+  context.subscriptions.push({ dispose: () => (clearInterval(timer), clearInterval(slow), clearTimeout(pending)) })
 }
 
 function deactivate() {

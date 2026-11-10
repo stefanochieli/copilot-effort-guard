@@ -8,20 +8,46 @@ function copilotHome(setting, env = process.env) {
   return setting || env.COPILOT_HOME || path.join(os.homedir(), '.copilot')
 }
 
-// Reads every ~/.copilot/effort-guard/state/<hash>/state.json written by the hooks.
-function readProjects(home) {
-  const root = path.join(home, 'effort-guard', 'state')
-  let dirs = []
+// Parsed state.json files by path, reused while mtime and size do not change: the
+// panel refreshes every 2 s and most files are untouched between two refreshes.
+const stateCache = new Map()
+
+function readState(file, cache = stateCache) {
+  let st
   try {
-    dirs = fs.readdirSync(root)
+    st = fs.statSync(file)
   } catch {
-    return []
+    cache.delete(file)
+    return null
   }
+  const hit = cache.get(file)
+  if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) {
+    return hit.state
+  }
+  try {
+    const state = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''))
+    if (!state || typeof state !== 'object') return null
+    cache.set(file, { mtimeMs: st.mtimeMs, size: st.size, state })
+    return state
+  } catch {
+    return hit?.state ?? null // half-written file: keep the last good copy
+  }
+}
+
+// Reads every ~/.copilot/effort-guard/state/<hash>/state.json written by the hooks
+// (per-user install) plus <folder>/.effort-guard/state.json of the given workspace
+// folders (per-repo install, `node scripts/install.mjs <repo>`).
+function readProjects(home, folders = [], cache = stateCache) {
+  const root = path.join(home, 'effort-guard', 'state')
+  const dirs = []
+  try {
+    for (const d of fs.readdirSync(root)) dirs.push(path.join(root, d))
+  } catch {}
+  for (const f of folders) dirs.push(path.join(f, '.effort-guard'))
   const out = []
-  for (const d of dirs) {
-    try {
-      out.push({ dir: path.join(root, d), state: JSON.parse(fs.readFileSync(path.join(root, d, 'state.json'), 'utf8')) })
-    } catch {}
+  for (const dir of dirs) {
+    const state = readState(path.join(dir, 'state.json'), cache)
+    if (state) out.push({ dir, state: state.cwd ? state : { ...state, cwd: path.dirname(dir) } })
   }
   return out
 }
@@ -58,7 +84,11 @@ function resetProject(dir, now = new Date()) {
     started: true,
     resetAt: now.toISOString(),
   }
-  fs.writeFileSync(file, JSON.stringify(next))
+  // Temporary file + rename: the hooks never read a half-written state.
+  const tmp = `${file}.${process.pid}.ext.tmp`
+  fs.writeFileSync(tmp, JSON.stringify(next))
+  fs.renameSync(tmp, file)
+  stateCache.delete(file)
   return next
 }
 
@@ -248,4 +278,4 @@ function formatReport(projects, now = Date.now()) {
     .join('\n\n')
 }
 
-module.exports = { resetProject, sessionKind, copilotHome, readProjects, findState, computeView, levelOf, textBar, renderHtml, shouldNotify, formatReport, isInside, LEVEL_THEME_COLOR, LEVEL_HEX }
+module.exports = { readState, resetProject, sessionKind, copilotHome, readProjects, findState, computeView, levelOf, textBar, renderHtml, shouldNotify, formatReport, isInside, LEVEL_THEME_COLOR, LEVEL_HEX }

@@ -1,6 +1,6 @@
 # Copilot Effort Guard per IntelliJ (e gli altri IDE JetBrains)
 
-Mostra quanto sta faticando il modello di GitHub Copilot, con consigli su cosa fare: alzare il thinking, passare a un modello più potente o scendere a uno più leggero. È l'equivalente per la IntelliJ Platform dell'[estensione VS Code](../vscode-extension/README.md): non calcola niente, legge lo stato scritto dagli hook di [copilot-effort-guard](../README.md) in `~/.copilot/effort-guard/state/<hash>/state.json`.
+Mostra quanto sta faticando il modello di GitHub Copilot, con consigli su cosa fare: alzare il thinking, passare a un modello più potente o scendere a uno più leggero. È l'equivalente per la IntelliJ Platform dell'[estensione VS Code](../vscode-extension/README.md): non calcola niente, legge lo stato scritto dagli hook di [copilot-effort-guard](../README.md) in `~/.copilot/effort-guard/state/<hash>/state.json` (installazione `--user`) oppure in `<progetto>/.effort-guard/state.json` (installazione per repository).
 
 > Stato: prima versione. Il codice è compilato e provato dalla CI (Gradle, IntelliJ Platform 2024.2), ma è stato scritto senza poter aprire un IDE: se qualcosa nell'interfaccia non torna, segnalalo con uno screenshot.
 

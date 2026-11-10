@@ -3,6 +3,8 @@ package com.stefanochieli.effortguard.core
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
+import java.util.concurrent.ConcurrentHashMap
 import java.time.Instant
 
 // Pure logic of the plugin (no IntelliJ imports, testable with plain JUnit).
@@ -20,10 +22,10 @@ enum class Level(val label: String, val hex: String, val emoji: String) {
     WARN("Struggling", "#f85149", "🔴"),
 }
 
-enum class Action(val badge: String) {
-    THINKING_UP("↑ Raise thinking"),
-    MODEL_UP("↑↑ Upgrade model"),
-    DOWN("↓ Downgrade"),
+enum class Action(val badge: String, val id: String) {
+    THINKING_UP("↑ Raise thinking", "thinking-up"),
+    MODEL_UP("↑↑ Upgrade model", "model-up"),
+    DOWN("↓ Downgrade", "down"),
 }
 
 enum class Notice { WARN, ESCALATE, CALM }
@@ -114,20 +116,52 @@ object EffortCore {
         return if (!fromEnv.isNullOrBlank()) Paths.get(fromEnv) else Paths.get(userHome, ".copilot")
     }
 
-    /** Reads every <home>/effort-guard/state/<hash>/state.json; unreadable files are skipped. */
-    fun readProjects(home: Path): List<Project> {
+    private class Cached(val modified: Long, val size: Long, val raw: Map<String, Any?>)
+
+    /** Parsed state files by path, reused while their time stamp and size do not change. */
+    private val cache = ConcurrentHashMap<Path, Cached>()
+
+    /** Reads one state.json; a half-written file returns the last good copy. */
+    fun readRaw(file: Path): Map<String, Any?>? {
+        val modified: Long
+        val size: Long
+        try {
+            modified = Files.getLastModifiedTime(file).toMillis()
+            size = Files.size(file)
+        } catch (_: Exception) {
+            cache.remove(file)
+            return null
+        }
+        val hit = cache[file]
+        if (hit != null && hit.modified == modified && hit.size == size) return hit.raw
+        return try {
+            val raw = Json.parseObject(Files.readString(file).removePrefix("\uFEFF"))
+            cache[file] = Cached(modified, size, raw)
+            raw
+        } catch (_: Exception) {
+            hit?.raw
+        }
+    }
+
+    /**
+     * Reads every <home>/effort-guard/state/<hash>/state.json (per-user install) and
+     * <folder>/.effort-guard/state.json of the given project folders (per-repo install).
+     * Unreadable files are skipped.
+     */
+    fun readProjects(home: Path, folders: List<String> = emptyList()): List<Project> {
+        val dirs = ArrayList<Path>()
         val root = home.resolve("effort-guard").resolve("state")
-        if (!Files.isDirectory(root)) return emptyList()
-        val out = ArrayList<Project>()
-        Files.newDirectoryStream(root).use { dirs ->
-            for (d in dirs) {
-                try {
-                    out.add(Project(d, Json.parseObject(Files.readString(d.resolve("state.json")))))
-                } catch (_: Exception) {
-                }
+        if (Files.isDirectory(root)) {
+            try {
+                Files.newDirectoryStream(root).use { ds -> ds.forEach { dirs.add(it) } }
+            } catch (_: Exception) {
             }
         }
-        return out
+        folders.forEach { dirs.add(Paths.get(it).resolve(".effort-guard")) }
+        return dirs.mapNotNull { dir ->
+            val raw = readRaw(dir.resolve("state.json")) ?: return@mapNotNull null
+            Project(dir, if (raw["cwd"] is String) raw else raw + ("cwd" to dir.parent.toString()))
+        }
     }
 
     private fun norm(p: String): String {
@@ -163,7 +197,15 @@ object EffortCore {
     fun resetProject(dir: Path, now: Instant = Instant.now()) {
         val file = dir.resolve("state.json")
         val next = resetRaw(Json.parseObject(Files.readString(file)), now)
-        Files.writeString(file, Json.stringify(next))
+        // Temporary file + atomic rename: the hooks never read a half-written state.
+        val tmp = file.resolveSibling("state.json.${ProcessHandle.current().pid()}.ide.tmp")
+        Files.writeString(tmp, Json.stringify(next))
+        try {
+            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING)
+        }
+        cache.remove(file)
     }
 
     fun levelOf(state: EffortState?, fallbackThreshold: Int = DEFAULT_THRESHOLD): Level {

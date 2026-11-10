@@ -50,7 +50,7 @@ class EffortMonitor(private val project: Project) : Disposable {
     fun refresh() {
         try {
             val folders = listOfNotNull(project.basePath)
-            val found = EffortCore.findState(EffortCore.readProjects(EffortCore.copilotHome()), folders)
+            val found = EffortCore.findState(EffortCore.readProjects(EffortCore.copilotHome(), folders), folders)
             val state = found?.state
             currentDir = found?.dir
             view = EffortCore.computeView(state, found?.raw)

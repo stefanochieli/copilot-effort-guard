@@ -42,7 +42,7 @@ git clone https://github.com/stefanochieli/copilot-effort-guard
 node copilot-effort-guard/scripts/install.mjs --user
 ```
 
-Dettagli in [SETUP](https://github.com/stefanochieli/copilot-effort-guard/blob/main/docs/SETUP.md). Serve Node.js 20 o superiore per gli hook.
+Funziona anche con l'installazione per repository (`install.mjs <repo>`): l'estensione legge pure `<cartella aperta>/.effort-guard/state.json`. Dettagli in [SETUP](https://github.com/stefanochieli/copilot-effort-guard/blob/main/docs/SETUP.md). Serve Node.js 20 o superiore per gli hook.
 
 ## Installazione dell'estensione
 

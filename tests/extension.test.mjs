@@ -102,3 +102,54 @@ test('resetProject clears streaks and keeps the history', () => {
   assert.equal(next.log.length, 1)
   assert.equal(next.cwd, '/p')
 })
+
+import { readFileSync, statSync, utimesSync, readdirSync } from 'node:fs'
+
+const shared = JSON.parse(readFileSync(new URL('./fixtures/shared/views.json', import.meta.url), 'utf8'))
+
+test('shared fixtures: same level, action, bar and advice as the IntelliJ plugin', () => {
+  for (const c of shared.views) {
+    const v = lib.computeView(c.state)
+    assert.equal(v.level, c.level, c.name)
+    assert.equal(v.action ?? null, c.action, c.name)
+    assert.equal(v.hint ?? null, c.hint, c.name)
+    if (c.bar) assert.equal(lib.textBar(v.streak, v.threshold), c.bar, c.name)
+  }
+  for (const n of shared.notify) {
+    assert.equal(lib.shouldNotify(n.prev, n.cur), n.notice, JSON.stringify(n))
+  }
+})
+
+test('readProjects also reads the per-repo state of the workspace folders', () => {
+  const home = mkdtempSync(join(tmpdir(), 'eg-home-'))
+  const repo = mkdtempSync(join(tmpdir(), 'eg-repo-'))
+  mkdirSync(join(repo, '.effort-guard'))
+  writeFileSync(join(repo, '.effort-guard', 'state.json'), JSON.stringify({ streak: 1, log: [] }))
+  const projects = lib.readProjects(home, [repo])
+  assert.equal(projects.length, 1)
+  assert.equal(projects[0].state.cwd, repo) // no cwd recorded: the repo folder is used
+  assert.equal(lib.findState(projects, [repo]).state.streak, 1)
+})
+
+test('readState reuses the parsed file until it changes and keeps the last good copy', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'eg-cache-'))
+  const file = join(dir, 'state.json')
+  const cache = new Map()
+  writeFileSync(file, JSON.stringify({ streak: 1 }))
+  const first = lib.readState(file, cache)
+  assert.equal(lib.readState(file, cache), first, 'unchanged file: same object, not parsed again')
+  writeFileSync(file, '{"streak": 2')
+  const later = new Date(Date.now() + 5000)
+  utimesSync(file, later, later)
+  assert.equal(lib.readState(file, cache).streak, 1, 'half-written file: last good copy')
+  writeFileSync(file, JSON.stringify({ streak: 3 }))
+  utimesSync(file, new Date(Date.now() + 10000), new Date(Date.now() + 10000))
+  assert.equal(lib.readState(file, cache).streak, 3)
+})
+
+test('resetProject writes atomically (no temporary file left)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'eg-reset2-'))
+  writeFileSync(join(dir, 'state.json'), JSON.stringify({ streak: 4, log: [], turn: {} }))
+  lib.resetProject(dir)
+  assert.deepEqual(readdirSync(dir), ['state.json'])
+})
