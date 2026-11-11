@@ -79,6 +79,21 @@ class EffortMonitor(private val project: Project) : Disposable {
         }
     }
 
+    /** Marks the last closed turn as a good ("up") or bad ("down") result; the same vote again removes it. */
+    fun vote(kind: String) {
+        val dir = currentDir
+        if (dir == null) {
+            show("No turn recorded for this folder yet.", NotificationType.INFORMATION)
+            return
+        }
+        try {
+            EffortCore.voteLast(dir, kind)
+            refresh()
+        } catch (e: Exception) {
+            show("Vote failed (${e.message}).", NotificationType.ERROR)
+        }
+    }
+
     /** Asks the two thresholds and writes them in .effort-guard.json, read by the hooks. Runs on the EDT. */
     fun setThresholds() {
         val base = project.basePath

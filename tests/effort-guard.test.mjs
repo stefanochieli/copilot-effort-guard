@@ -423,3 +423,36 @@ test('per-project thresholds come from .effort-guard.json in the folder or a par
   writeFileSync(join(root, '.effort-guard.json'), '{broken')
   assert.deepEqual(projectConfig(root), {})
 })
+
+import { looksLikeRework, isEditTool, editedFiles } from '../src/quality.mjs'
+
+test('rework prompts in Italian and English, not ordinary requests', () => {
+  for (const p of ['non funziona ancora', 'è sbagliato, rifai', "it doesn't work", 'still failing', 'revert that', 'ancora errore nel build'])
+    assert.equal(looksLikeRework(p), true, p)
+  for (const p of ['aggiungi la gestione degli errori', 'add a test for the parser', 'spiega questo codice', '', undefined])
+    assert.equal(looksLikeRework(p), false, String(p))
+})
+
+test('quality signals: last test outcome, re-edited files, rework on the closed turn', () => {
+  const edit = f => ({ toolName: 'edit', toolArgs: { path: f }, toolResult: { resultType: 'success' } })
+  const green = { toolName: 'bash', toolArgs: { command: 'npm test' }, toolResult: { textResultForLlm: '12 passing' } }
+  const red = { toolName: 'bash', toolArgs: { command: 'npm test' }, toolResult: { textResultForLlm: '2 failing' } }
+  assert.equal(isEditTool('replace_string_in_file'), true)
+  assert.equal(isEditTool('read_file'), false)
+  assert.equal(editedFiles({ filePath: 'src\\A.js' })[0], editedFiles({ path: './src/a.js' })[0])
+  let s = emptyState()
+  s = run('prompt', {}, s, 3).state
+  s = run('tool', edit('a.js'), s, 3).state
+  s = run('tool', red, s, 3).state
+  s = run('tool', green, s, 3).state
+  s = run('prompt', { prompt: 'next task' }, s, 3).state
+  assert.equal(s.log.at(-1).tests, 'green')
+  assert.equal(s.log.at(-1).struggled, false, 'red then green')
+  assert.equal(s.log.at(-1).reedits, undefined)
+  s = run('tool', edit('a.js'), s, 3).state
+  s = run('prompt', { prompt: 'non funziona, rifai' }, s, 3).state
+  assert.equal(s.log.at(-1).reedits, 1)
+  assert.equal(s.log.at(-1).rework, true)
+  assert.equal(JSON.stringify(s).includes('a.js'), false, 'paths are not stored')
+  assert.match(summary(s), /Result quality \d+%/)
+})

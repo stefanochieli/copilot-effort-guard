@@ -166,7 +166,21 @@ async function exportCsv() {
   vscode.window.showInformationMessage(`Effort Guard: history exported to ${target.fsPath}`)
 }
 
-const PANEL_ACTIONS = { reset: () => resetEvaluation(), install: () => installHooks(), thresholds: () => setThresholds(), csv: () => exportCsv() }
+function vote(kind) {
+  if (!currentDir) {
+    vscode.window.showInformationMessage('Effort Guard: no turn recorded for this folder yet.')
+    return
+  }
+  try {
+    const v = lib.voteLast(currentDir, kind)
+    refresh()
+    vscode.window.setStatusBarMessage(v ? `Effort Guard: last turn marked ${v === 'up' ? 'good' : 'bad'}` : 'Effort Guard: vote removed', 3000)
+  } catch (err) {
+    vscode.window.showErrorMessage(`Effort Guard: vote failed (${err.message})`)
+  }
+}
+
+const PANEL_ACTIONS = { 'vote-up': () => vote('up'), 'vote-down': () => vote('down'), reset: () => resetEvaluation(), install: () => installHooks(), thresholds: () => setThresholds(), csv: () => exportCsv() }
 
 function activate(context) {
   extensionContext = context
@@ -194,6 +208,8 @@ function activate(context) {
     vscode.commands.registerCommand('effortGuard.installHooks', installHooks),
     vscode.commands.registerCommand('effortGuard.setThresholds', setThresholds),
     vscode.commands.registerCommand('effortGuard.exportCsv', exportCsv),
+    vscode.commands.registerCommand('effortGuard.voteUp', () => vote('up')),
+    vscode.commands.registerCommand('effortGuard.voteDown', () => vote('down')),
     vscode.commands.registerCommand('effortGuard.showReport', () => {
       channel.clear()
       channel.appendLine(lib.formatReport(lib.readProjects(settings().home, (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath))))

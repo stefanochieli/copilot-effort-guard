@@ -187,4 +187,34 @@ class EffortCoreTest {
         assertEquals(4.0, cfg["threshold"])
         assertEquals(10.0, cfg["calmThreshold"])
     }
+
+    private fun entryOf(m: Any?) = EffortCore.toState(mapOf("log" to listOf(m))).entries.single()
+
+    /** Same cases as tests/extension.test.mjs and src/quality.mjs. */
+    @Test
+    fun sharedQuality() {
+        val q = shared["quality"] as Map<*, *>
+        for (c in q["entries"] as List<*>) {
+            val case = c as Map<*, *>
+            assertEquals((case["quality"] as? Number)?.toDouble(), EffortCore.qualityOf(entryOf(case["entry"])), case.toString())
+        }
+        for (c in q["summaries"] as List<*>) {
+            val case = c as Map<*, *>
+            val entries = EffortCore.toState(mapOf("log" to case["log"])).entries
+            val r = EffortCore.qualitySummary(entries)
+            assertEquals((case["score"] as? Number)?.toInt(), r.score, case.toString())
+            assertEquals(case["level"], r.level, case.toString())
+            assertEquals((case["rated"] as Number).toInt(), r.rated, case.toString())
+        }
+    }
+
+    @Test
+    fun voteOnLastTurn() {
+        val dir = Files.createTempDirectory("eg-vote")
+        Files.writeString(dir.resolve("state.json"), """{"streak":0,"turn":{},"log":[{"ts":"t","struggled":false,"tests":"red"}]}""")
+        assertEquals("up", EffortCore.voteLast(dir, "up"))
+        assertEquals(100, EffortCore.qualitySummary(EffortCore.toState(EffortCore.readRaw(dir.resolve("state.json"))!!).entries).score)
+        assertNull(EffortCore.voteLast(dir, "up"))
+        assertEquals(listOf("state.json"), Files.list(dir).use { s -> s.map { it.fileName.toString() }.toList() })
+    }
 }
