@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.9.0...v0.10.0) (2026-11-11)
+
+
+### Features
+
+* faster extensions, hook installer, per-project thresholds and history ([#52](https://github.com/stefanochieli/copilot-effort-guard/issues/52)) ([3670f4e](https://github.com/stefanochieli/copilot-effort-guard/commit/3670f4eb9a106a0026f1923618c4d499231cc042))
+
 ## [0.9.0](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.8.0...v0.9.0) (2026-11-10)
 
 
