@@ -13,6 +13,7 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.content.ContentFactory
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
+import com.stefanochieli.effortguard.core.DayCount
 import com.stefanochieli.effortguard.core.EffortCore
 import com.stefanochieli.effortguard.core.EffortView
 import com.stefanochieli.effortguard.core.Level
@@ -122,6 +123,45 @@ private class Timeline : JComponent() {
     }
 }
 
+/** Turns per day (last 14 days): struggling turns in red on top of the clean ones. */
+private class HistoryChart : JComponent() {
+    var days: List<DayCount> = emptyList()
+
+    init {
+        alignmentX = LEFT_ALIGNMENT
+        preferredSize = Dimension(JBUI.scale(240), JBUI.scale(48))
+        maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(48))
+    }
+
+    override fun getToolTipText(event: java.awt.event.MouseEvent): String? {
+        if (days.isEmpty()) return null
+        val i = (event.x * days.size / maxOf(width, 1)).coerceIn(0, days.size - 1)
+        val d = days[i]
+        return "${d.day}: ${d.turns} turns, ${d.struggling} struggling"
+    }
+
+    override fun paintComponent(g: Graphics) {
+        if (days.isEmpty()) return
+        val g2 = g.create() as Graphics2D
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+        val max = maxOf(1, days.maxOf { it.turns })
+        val gap = JBUI.scale(3)
+        val w = maxOf(2, (width - gap * (days.size - 1)) / days.size)
+        days.forEachIndexed { i, d ->
+            val x = i * (w + gap)
+            val total = height * d.turns / max
+            val bad = height * d.struggling / max
+            g2.color = if (d.turns == 0) JBColor.border() else hex(Level.OK.hex)
+            g2.fillRoundRect(x, height - maxOf(total, 1), w, maxOf(total, 1), 3, 3)
+            if (bad > 0) {
+                g2.color = hex(Level.WARN.hex)
+                g2.fillRoundRect(x, height - bad, w, bad, 3, 3)
+            }
+        }
+        g2.dispose()
+    }
+}
+
 /** Content of the Effort Guard tool window; refreshed every time the monitor reads new state. */
 class EffortPanel(project: Project) : JPanel(BorderLayout()), Disposable {
     private val monitor = project.service<EffortMonitor>()
@@ -137,6 +177,10 @@ class EffortPanel(project: Project) : JPanel(BorderLayout()), Disposable {
     private val sessionsArea = JTextArea()
     private val metaArea = JTextArea()
     private val resetButton = JButton("Reset after changing model / thinking")
+    private val thresholdsButton = JButton("Thresholds…")
+    private val historyTitle = JBLabel()
+    private val history = HistoryChart()
+    private val reasonsArea = JTextArea()
 
     private val listener = Runnable {
         ApplicationManager.getApplication().invokeLater { render(monitor.view) }
@@ -160,7 +204,7 @@ class EffortPanel(project: Project) : JPanel(BorderLayout()), Disposable {
         header.add(badgeLabel)
         header.add(countLabel)
 
-        for (area in listOf(hintArea, sessionsArea, metaArea)) {
+        for (area in listOf(hintArea, sessionsArea, metaArea, reasonsArea)) {
             area.isEditable = false
             area.isOpaque = false
             area.lineWrap = true
@@ -175,6 +219,11 @@ class EffortPanel(project: Project) : JPanel(BorderLayout()), Disposable {
         resetButton.alignmentX = LEFT_ALIGNMENT
         resetButton.toolTipText = "Use it after changing the model or the thinking effort: streaks start again from zero."
         resetButton.addActionListener { monitor.resetEvaluation() }
+        thresholdsButton.alignmentX = LEFT_ALIGNMENT
+        thresholdsButton.toolTipText = "Writes .effort-guard.json in the project: the hooks use it from the next Copilot event."
+        thresholdsButton.addActionListener { monitor.setThresholds() }
+        history.toolTipText = ""
+        reasonsArea.foreground = UIUtil.getContextHelpForeground()
 
         fun title(text: String) = JBLabel(text).apply {
             foreground = UIUtil.getContextHelpForeground()
@@ -195,9 +244,16 @@ class EffortPanel(project: Project) : JPanel(BorderLayout()), Disposable {
         column.add(timeline)
         column.add(JPanel().apply { isOpaque = false; preferredSize = Dimension(0, JBUI.scale(8)); maximumSize = preferredSize })
         column.add(hintArea)
+        column.add(title("LAST 14 DAYS"))
+        column.add(history)
+        historyTitle.alignmentX = LEFT_ALIGNMENT
+        historyTitle.foreground = UIUtil.getContextHelpForeground()
+        column.add(historyTitle)
+        column.add(reasonsArea)
         column.add(title("SESSIONS IN THIS FOLDER"))
         column.add(sessionsArea)
         column.add(resetButton)
+        column.add(thresholdsButton)
         column.add(JPanel().apply { isOpaque = false; preferredSize = Dimension(0, JBUI.scale(8)); maximumSize = preferredSize })
         column.add(metaArea)
         add(column, BorderLayout.NORTH)
@@ -234,6 +290,12 @@ class EffortPanel(project: Project) : JPanel(BorderLayout()), Disposable {
             BorderFactory.createMatteBorder(0, 3, 0, 0, color),
             JBUI.Borders.empty(6, 8),
         )
+        history.days = view.history
+        val total = view.history.sumOf { it.turns }
+        historyTitle.text = if (total == 0) "No turns in the last 14 days" else "$total turns, ${view.history.sumOf { it.struggling }} struggling (red)"
+        reasonsArea.isVisible = view.reasons.isNotEmpty()
+        reasonsArea.text = "Why it struggled: " + view.reasons.joinToString(", ") { "${it.first} ${it.second}" }
+        thresholdsButton.text = "Thresholds (${view.threshold} / ${view.calmThreshold})…"
         val sessions = view.sessions.mapIndexed { i, s ->
             "${s.kind ?: s.source} / ${s.id}${if (i == 0) " (latest)" else ""}  ${EffortCore.ageText(s.last)}"
         }

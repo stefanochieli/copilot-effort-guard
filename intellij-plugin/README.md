@@ -1,6 +1,6 @@
 # Copilot Effort Guard per IntelliJ (e gli altri IDE JetBrains)
 
-Mostra quanto sta faticando il modello di GitHub Copilot, con consigli su cosa fare: alzare il thinking, passare a un modello più potente o scendere a uno più leggero. È l'equivalente per la IntelliJ Platform dell'[estensione VS Code](../vscode-extension/README.md): non calcola niente, legge lo stato scritto dagli hook di [copilot-effort-guard](../README.md) in `~/.copilot/effort-guard/state/<hash>/state.json`.
+Mostra quanto sta faticando il modello di GitHub Copilot, con consigli su cosa fare: alzare il thinking, passare a un modello più potente o scendere a uno più leggero. È l'equivalente per la IntelliJ Platform dell'[estensione VS Code](../vscode-extension/README.md): non calcola niente, legge lo stato scritto dagli hook di [copilot-effort-guard](../README.md) in `~/.copilot/effort-guard/state/<hash>/state.json` (installazione `--user`) oppure in `<progetto>/.effort-guard/state.json` (installazione per repository).
 
 > Stato: prima versione. Il codice è compilato e provato dalla CI (Gradle, IntelliJ Platform 2024.2), ma è stato scritto senza poter aprire un IDE: se qualcosa nell'interfaccia non torna, segnalalo con uno screenshot.
 
@@ -55,3 +55,7 @@ La logica in `core/` ha i suoi test (`EffortCoreTest.kt`); l'interfaccia si prov
 ## Release
 
 La versione in `gradle.properties` è aggiornata da release-please insieme al resto del repository. A ogni release il job `publish-intellij-plugin` costruisce lo zip e lo allega alla GitHub Release. Se nei secret del repo c'è `JETBRAINS_PUBLISH_TOKEN` (token di <https://plugins.jetbrains.com/author/me/tokens>), lo stesso job pubblica lo zip anche sul JetBrains Marketplace con `publishPlugin`; ogni versione passa da una breve revisione JetBrains. Il primo upload della scheda va fatto a mano.
+
+## Storico e soglie
+
+La tool window mostra i turni degli ultimi 14 giorni (in rosso quelli faticosi) e i motivi più frequenti. Il pulsante *Thresholds…* scrive `.effort-guard.json` nella cartella del progetto: gli hook lo leggono dal prossimo evento di Copilot.

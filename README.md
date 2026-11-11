@@ -6,7 +6,7 @@ Hook per **GitHub Copilot** (Copilot CLI e agent hooks di VS Code) che osserva i
 
 - **Turno faticoso**: un tool fallito (`postToolUseFailure` o `resultType: "failure"`), un comando di test/build (`npm test`, `ng test`, `mvn`, `gradle`, `pytest`, `go test`…) il cui output contiene un fallimento anche con exit code 0, un comando shell con exit code diverso da 0 (letto da `exitCode`/`exit_code` o dal testo "exit code N"; ignorato per `grep`, `diff`, `test`…), oppure lo stesso comando fallito due volte nel turno. Se nello stesso turno un comando di test/build riesce dopo un fallimento (rosso poi verde) il turno non conta come faticoso (`EFFORT_GUARD_RED_GREEN=0` lo disattiva).
 - **Escalation**: alla soglia (default 3) l'avviso va su stderr e viene offerto all'agente come `additionalContext`. Un turno pulito azzera la serie.
-- **Stato**: `.effort-guard/state.json` (l'installazione per repository aggiunge `.effort-guard/` al `.gitignore` del repo, salvo `--no-gitignore`); cartella cambiabile con `EFFORT_GUARD_DIR`, soglia con `EFFORT_GUARD_THRESHOLD`.
+- **Stato**: `.effort-guard/state.json` (l'installazione per repository aggiunge `.effort-guard/` al `.gitignore` del repo, salvo `--no-gitignore`); cartella cambiabile con `EFFORT_GUARD_DIR`, soglia con `EFFORT_GUARD_THRESHOLD`. Soglie per progetto: `.effort-guard.json` (`{"threshold": 4, "calmThreshold": 10}`) nella cartella o in una cartella superiore, scritto anche dalle estensioni e committabile per condividerlo col team; le variabili d'ambiente hanno la precedenza.
 - `npm run summary` stampa il riepilogo dei turni.
 
 ## Uso

@@ -232,6 +232,42 @@ export function summary(state) {
   return `effort-guard: ${state.log.length} turns, ${struggled.length} struggling${top ? ` (most common: ${top[0]})` : ''}.`
 }
 
+// Per-project thresholds: `.effort-guard.json` in the working directory or one of its
+// parents (written by the IDE extensions, can be committed to share it with the team):
+// { "threshold": 4, "calmThreshold": 10 }. The environment variables still win.
+export const CONFIG_FILE = '.effort-guard.json'
+
+export function projectConfig(cwd = activeCwd) {
+  let dir = resolve(String(cwd))
+  for (let i = 0; i < 10; i++) {
+    const file = join(dir, CONFIG_FILE)
+    try {
+      const raw = JSON.parse(readFileSync(file, 'utf8').replace(/^\uFEFF/, ''))
+      return raw && typeof raw === 'object' ? { ...raw, file } : {}
+    } catch (err) {
+      if (err?.code !== 'ENOENT' && err?.code !== 'ENOTDIR') {
+        return {} // present but unreadable: defaults, never a crash
+      }
+    }
+    const up = dirname(dir)
+    if (up === dir) break
+    dir = up
+  }
+  return {}
+}
+
+const intIn = (v, min, max) => {
+  const n = Math.floor(Number(v))
+  return Number.isFinite(n) && n >= min && n <= max ? n : undefined
+}
+
+export function thresholds(env = process.env, config = {}) {
+  return {
+    threshold: intIn(env.EFFORT_GUARD_THRESHOLD, 1, 100) ?? intIn(config.threshold, 1, 100) ?? DEFAULT_THRESHOLD,
+    calmThreshold: intIn(env.EFFORT_GUARD_CALM, 2, 1000) ?? intIn(config.calmThreshold, 2, 1000) ?? DEFAULT_CALM,
+  }
+}
+
 export function copilotHome() {
   return process.env.COPILOT_HOME ?? join(homedir(), '.copilot')
 }
@@ -570,7 +606,7 @@ function doctor() {
       duplicateHooks: existsSync(hooksFile) && existsSync(join(activeCwd, '.github', 'hooks', 'effort-guard.json')) ? join(activeCwd, '.github', 'hooks', 'effort-guard.json') : null,
       stateDir: dir,
       stateExists: existsSync(dir),
-      threshold: Math.max(1, Math.floor(Number(process.env.EFFORT_GUARD_THRESHOLD)) || DEFAULT_THRESHOLD),
+      threshold: thresholds(process.env, projectConfig(activeCwd)).threshold,
       debug: Boolean(process.env.EFFORT_GUARD_DEBUG),
       events: lastEvents(200),
       projects,
@@ -581,9 +617,9 @@ function doctor() {
 function barInfo(s) {
   return {
     streak: s.streak ?? 0,
-    threshold: s.threshold || Math.max(1, Math.floor(Number(process.env.EFFORT_GUARD_THRESHOLD)) || DEFAULT_THRESHOLD),
+    threshold: s.threshold || thresholds(process.env, projectConfig(activeCwd)).threshold,
     calm: s.calm ?? 0,
-    calmThreshold: s.calmThreshold || DEFAULT_CALM,
+    calmThreshold: s.calmThreshold || thresholds(process.env, projectConfig(activeCwd)).calmThreshold,
     struggling: Boolean(s.turn?.struggled),
   }
 }
@@ -628,7 +664,6 @@ function watch() {
 }
 
 function main() {
-  const threshold = Math.max(1, Math.floor(Number(process.env.EFFORT_GUARD_THRESHOLD)) || DEFAULT_THRESHOLD)
   const arg = normaliseEvent(process.argv[2])
 
   if (arg === 'selftest') {
@@ -666,7 +701,7 @@ function main() {
   debugDump(event, payload, input)
 
   const path = statePath()
-  const calmThreshold = Math.max(2, Math.floor(Number(process.env.EFFORT_GUARD_CALM)) || DEFAULT_CALM)
+  const { threshold, calmThreshold } = thresholds(process.env, projectConfig(activeCwd))
   withLock(path, () => {
     const before = load(path)
     const result = run(event, payload, before, threshold, new Date(), calmThreshold)
