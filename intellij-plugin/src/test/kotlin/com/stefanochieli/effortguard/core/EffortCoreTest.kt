@@ -111,4 +111,80 @@ class EffortCoreTest {
         assertEquals("-", EffortCore.ageText(null, now))
         assertEquals("-", EffortCore.ageText("nope", now))
     }
+
+    private val shared: Map<String, Any?> =
+        Json.parseObject(Files.readString(java.nio.file.Paths.get("..", "tests", "fixtures", "shared", "views.json")))
+
+    @Suppress("UNCHECKED_CAST")
+    private fun rawOf(v: Any?): Map<String, Any?>? = v as? Map<String, Any?>
+
+    /** Same cases as tests/extension.test.mjs: the two extensions must agree. */
+    @Test
+    fun sharedFixtures() {
+        for (c in shared["views"] as List<*>) {
+            val case = c as Map<*, *>
+            val name = case["name"].toString()
+            val raw = rawOf(case["state"])
+            val view = EffortCore.computeView(raw?.let { EffortCore.toState(it) }, raw)
+            assertEquals(case["level"], view.level.name.lowercase(), name)
+            assertEquals(case["action"], view.action?.id, name)
+            assertEquals(case["hint"], view.hint, name)
+            case["bar"]?.let { assertEquals(it, EffortCore.textBar(view.streak, view.threshold), name) }
+        }
+        for (n in shared["notify"] as List<*>) {
+            val case = n as Map<*, *>
+            val prev = rawOf(case["prev"])?.let { EffortCore.toState(it) }
+            val cur = rawOf(case["cur"])?.let { EffortCore.toState(it) }
+            assertEquals(case["notice"], EffortCore.shouldNotify(prev, cur)?.name?.lowercase(), case.toString())
+        }
+    }
+
+    @Test
+    fun perRepoStateAndCache() {
+        val home = Files.createTempDirectory("eg-home")
+        val repo = Files.createTempDirectory("eg-repo")
+        Files.createDirectories(repo.resolve(".effort-guard"))
+        val file = repo.resolve(".effort-guard").resolve("state.json")
+        Files.writeString(file, """{"streak":1,"log":[]}""")
+        val projects = EffortCore.readProjects(home, listOf(repo.toString()))
+        assertEquals(1, projects.size)
+        assertEquals(repo.toString(), projects[0].state.cwd)
+        val first = EffortCore.readRaw(file)
+        assertTrue(first === EffortCore.readRaw(file), "unchanged file is not parsed again")
+        Files.writeString(file, """{"streak":""")
+        Files.setLastModifiedTime(file, java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() + 5000))
+        assertEquals(1.0, EffortCore.readRaw(file)?.get("streak"), "half-written file: last good copy")
+        Files.writeString(file, """{"streak":4,"log":[],"turn":{}}""")
+        Files.setLastModifiedTime(file, java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() + 10000))
+        EffortCore.resetProject(file.parent)
+        assertEquals(listOf("state.json"), Files.list(file.parent).use { s -> s.map { it.fileName.toString() }.toList() })
+        assertEquals(0.0, EffortCore.readRaw(file)?.get("streak"))
+    }
+
+    @Test
+    fun sharedHistory() {
+        for (h in shared["history"] as List<*>) {
+            val case = h as Map<*, *>
+            val entries = EffortCore.toState(mapOf("log" to case["log"])).entries
+            val days = EffortCore.dailyHistory(entries, (case["days"] as Number).toInt(), Instant.parse(case["now"] as String))
+            val expected = (case["expected"] as List<*>).map {
+                val d = it as Map<*, *>
+                DayCount(d["day"] as String, (d["turns"] as Number).toInt(), (d["struggling"] as Number).toInt())
+            }
+            assertEquals(expected, days)
+            val reasons = (case["reasons"] as List<*>).map { val r = it as List<*>; (r[0] as String) to (r[1] as Number).toInt() }
+            assertEquals(reasons, EffortCore.reasonCounts(entries))
+        }
+    }
+
+    @Test
+    fun thresholdsFileKeepsOtherKeys() {
+        val dir = Files.createTempDirectory("eg-cfg")
+        Files.writeString(dir.resolve(".effort-guard.json"), """{"note":"team"}""")
+        EffortCore.writeConfig(dir, 4, 10)
+        val cfg = EffortCore.readConfig(dir)
+        assertEquals("team", cfg["note"])
+        assertEquals(4.0, cfg["threshold"])
+        assertEquals(10.0, cfg["calmThreshold"])
+    }
 }

@@ -3,6 +3,8 @@ package com.stefanochieli.effortguard.core
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
+import java.util.concurrent.ConcurrentHashMap
 import java.time.Instant
 
 // Pure logic of the plugin (no IntelliJ imports, testable with plain JUnit).
@@ -20,10 +22,10 @@ enum class Level(val label: String, val hex: String, val emoji: String) {
     WARN("Struggling", "#f85149", "🔴"),
 }
 
-enum class Action(val badge: String) {
-    THINKING_UP("↑ Raise thinking"),
-    MODEL_UP("↑↑ Upgrade model"),
-    DOWN("↓ Downgrade"),
+enum class Action(val badge: String, val id: String) {
+    THINKING_UP("↑ Raise thinking", "thinking-up"),
+    MODEL_UP("↑↑ Upgrade model", "model-up"),
+    DOWN("↓ Downgrade", "down"),
 }
 
 enum class Notice { WARN, ESCALATE, CALM }
@@ -40,6 +42,12 @@ fun sessionKind(source: String?): String? = when {
     else -> null
 }
 
+/** One closed turn of the log: when, whether it struggled, and why. */
+data class LogEntry(val ts: String?, val struggled: Boolean, val reason: String?)
+
+/** Turns and struggling turns of one UTC day (yyyy-MM-dd). */
+data class DayCount(val day: String, val turns: Int, val struggling: Int)
+
 data class EffortState(
     val cwd: String?,
     val streak: Int,
@@ -52,6 +60,7 @@ data class EffortState(
     val updated: String?,
     val session: SessionInfo?,
     val sessions: List<SessionInfo>,
+    val entries: List<LogEntry> = emptyList(),
 )
 
 data class Messages(val warn: String, val escalate: String, val calm: String)
@@ -76,6 +85,8 @@ data class EffortView(
     val cwd: String?,
     val updated: String?,
     val resetAt: String?,
+    val history: List<DayCount> = emptyList(),
+    val reasons: List<Pair<String, Int>> = emptyList(),
 )
 
 /** One state.json found on disk: its folder and the raw JSON (kept whole, so a reset loses nothing). */
@@ -93,7 +104,11 @@ object EffortCore {
 
     fun toState(raw: Map<String, Any?>): EffortState {
         val turn = raw["turn"] as? Map<*, *>
-        val log = (raw["log"] as? List<*>).orEmpty().map { (it as? Map<*, *>)?.get("struggled") == true }
+        val entries = (raw["log"] as? List<*>).orEmpty().map {
+            val e = it as? Map<*, *>
+            LogEntry(e?.get("ts") as? String, e?.get("struggled") == true, e?.get("reason") as? String)
+        }
+        val log = entries.map { it.struggled }
         return EffortState(
             cwd = raw["cwd"] as? String,
             streak = num(raw["streak"]) ?: 0,
@@ -106,6 +121,7 @@ object EffortCore {
             updated = raw["updated"] as? String,
             session = session(raw["session"]),
             sessions = (raw["sessions"] as? List<*>).orEmpty().mapNotNull { session(it) },
+            entries = entries,
         )
     }
 
@@ -114,20 +130,52 @@ object EffortCore {
         return if (!fromEnv.isNullOrBlank()) Paths.get(fromEnv) else Paths.get(userHome, ".copilot")
     }
 
-    /** Reads every <home>/effort-guard/state/<hash>/state.json; unreadable files are skipped. */
-    fun readProjects(home: Path): List<Project> {
+    private class Cached(val modified: Long, val size: Long, val raw: Map<String, Any?>)
+
+    /** Parsed state files by path, reused while their time stamp and size do not change. */
+    private val cache = ConcurrentHashMap<Path, Cached>()
+
+    /** Reads one state.json; a half-written file returns the last good copy. */
+    fun readRaw(file: Path): Map<String, Any?>? {
+        val modified: Long
+        val size: Long
+        try {
+            modified = Files.getLastModifiedTime(file).toMillis()
+            size = Files.size(file)
+        } catch (_: Exception) {
+            cache.remove(file)
+            return null
+        }
+        val hit = cache[file]
+        if (hit != null && hit.modified == modified && hit.size == size) return hit.raw
+        return try {
+            val raw = Json.parseObject(Files.readString(file).removePrefix("\uFEFF"))
+            cache[file] = Cached(modified, size, raw)
+            raw
+        } catch (_: Exception) {
+            hit?.raw
+        }
+    }
+
+    /**
+     * Reads every <home>/effort-guard/state/<hash>/state.json (per-user install) and
+     * <folder>/.effort-guard/state.json of the given project folders (per-repo install).
+     * Unreadable files are skipped.
+     */
+    fun readProjects(home: Path, folders: List<String> = emptyList()): List<Project> {
+        val dirs = ArrayList<Path>()
         val root = home.resolve("effort-guard").resolve("state")
-        if (!Files.isDirectory(root)) return emptyList()
-        val out = ArrayList<Project>()
-        Files.newDirectoryStream(root).use { dirs ->
-            for (d in dirs) {
-                try {
-                    out.add(Project(d, Json.parseObject(Files.readString(d.resolve("state.json")))))
-                } catch (_: Exception) {
-                }
+        if (Files.isDirectory(root)) {
+            try {
+                Files.newDirectoryStream(root).use { ds -> ds.forEach { dirs.add(it) } }
+            } catch (_: Exception) {
             }
         }
-        return out
+        folders.forEach { dirs.add(Paths.get(it).resolve(".effort-guard")) }
+        return dirs.mapNotNull { dir ->
+            val raw = readRaw(dir.resolve("state.json")) ?: return@mapNotNull null
+            Project(dir, if (raw["cwd"] is String) raw else raw + ("cwd" to dir.parent.toString()))
+        }
     }
 
     private fun norm(p: String): String {
@@ -163,7 +211,15 @@ object EffortCore {
     fun resetProject(dir: Path, now: Instant = Instant.now()) {
         val file = dir.resolve("state.json")
         val next = resetRaw(Json.parseObject(Files.readString(file)), now)
-        Files.writeString(file, Json.stringify(next))
+        // Temporary file + atomic rename: the hooks never read a half-written state.
+        val tmp = file.resolveSibling("state.json.${ProcessHandle.current().pid()}.ide.tmp")
+        Files.writeString(tmp, Json.stringify(next))
+        try {
+            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING)
+        }
+        cache.remove(file)
     }
 
     fun levelOf(state: EffortState?, fallbackThreshold: Int = DEFAULT_THRESHOLD): Level {
@@ -235,6 +291,7 @@ object EffortCore {
             action = action, hint = hint, messages = messages,
             kind = kind, session = state.session, sessions = state.sessions,
             cwd = state.cwd, updated = state.updated, resetAt = raw?.get("resetAt") as? String,
+            history = dailyHistory(state.entries), reasons = reasonCounts(state.entries),
         )
     }
 
@@ -249,6 +306,41 @@ object EffortCore {
         if (cur.calm >= calmThreshold && (prev?.calm ?: 0) < calmThreshold) return Notice.CALM
         return null
     }
+
+    /** Turns per UTC day for the last `days` days, oldest first, empty days included (same as lib.js). */
+    fun dailyHistory(entries: List<LogEntry>, days: Int = 14, now: Instant = Instant.now()): List<DayCount> {
+        val today = now.atZone(java.time.ZoneOffset.UTC).toLocalDate()
+        val keys = (days - 1 downTo 0).map { today.minusDays(it.toLong()).toString() }
+        val turns = HashMap<String, Int>()
+        val bad = HashMap<String, Int>()
+        for (e in entries) {
+            val day = try { Instant.parse(e.ts ?: continue).atZone(java.time.ZoneOffset.UTC).toLocalDate().toString() } catch (_: Exception) { continue }
+            turns.merge(day, 1, Int::plus)
+            if (e.struggled) bad.merge(day, 1, Int::plus)
+        }
+        return keys.map { DayCount(it, turns[it] ?: 0, bad[it] ?: 0) }
+    }
+
+    /** Reasons of the struggling turns, most frequent first. */
+    fun reasonCounts(entries: List<LogEntry>): List<Pair<String, Int>> =
+        entries.filter { it.struggled }.groupingBy { it.reason ?: "unknown" }.eachCount()
+            .entries.sortedByDescending { it.value }.map { it.key to it.value }
+
+    const val CONFIG_FILE = ".effort-guard.json"
+
+    /** Per-project thresholds read by the hooks; other keys of the file are kept. */
+    fun writeConfig(folder: Path, threshold: Int, calmThreshold: Int): Path {
+        val file = folder.resolve(CONFIG_FILE)
+        val current = try { Json.parseObject(Files.readString(file)) } catch (_: Exception) { emptyMap() }
+        val next = LinkedHashMap(current)
+        next["threshold"] = threshold
+        next["calmThreshold"] = calmThreshold
+        Files.writeString(file, Json.stringify(next) + "\n")
+        return file
+    }
+
+    fun readConfig(folder: Path): Map<String, Any?> =
+        try { Json.parseObject(Files.readString(folder.resolve(CONFIG_FILE))) } catch (_: Exception) { emptyMap() }
 
     fun ageText(iso: String?, now: Instant = Instant.now()): String {
         if (iso == null) return "-"

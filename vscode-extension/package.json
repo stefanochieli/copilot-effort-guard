@@ -24,6 +24,9 @@
     "Other"
   ],
   "main": "./extension.js",
+  "scripts": {
+    "vscode:prepublish": "node ../scripts/bundle-hooks.mjs"
+  },
   "activationEvents": [
     "onStartupFinished"
   ],
@@ -36,6 +39,18 @@
       {
         "command": "effortGuard.reset",
         "title": "Effort Guard: Reset after changing model or thinking"
+      },
+      {
+        "command": "effortGuard.installHooks",
+        "title": "Effort Guard: Install or update the Copilot hooks"
+      },
+      {
+        "command": "effortGuard.setThresholds",
+        "title": "Effort Guard: Set thresholds for this project"
+      },
+      {
+        "command": "effortGuard.exportCsv",
+        "title": "Effort Guard: Export history as CSV"
       }
     ],
     "configuration": {

@@ -81,7 +81,7 @@ Per avere un indicatore sempre visibile (barra `▰▱▱ 1/3` che cambia colore
 - **`doctor` resta vuoto anche dopo il riavvio**: prova a registrare gli stessi comandi come hook inline in `~/.copilot/config.json` (stessi eventi e stessi comandi di `~/.copilot/hooks/effort-guard.json`). È un ripiego non ancora verificato su una CLI reale: se funziona, segnalalo.
 - **Gli hook girano ma non vedi l'avviso**: secondo la documentazione GitHub l'output degli hook `userPromptSubmitted` definiti in file viene ignorato dalla CLI, e non è chiaro dove finisca stderr. L'avviso è comunque in `events.log` e in `watch`.
 - **Turni registrati ma nessun avviso visibile**: il client non mostra stderr o `additionalContext`; l'avviso resta nel riepilogo.
-- **Falsi positivi**: alza `EFFORT_GUARD_THRESHOLD`.
+- **Falsi positivi**: alza la soglia del progetto (`.effort-guard.json`, o *Thresholds…* nel pannello delle estensioni) oppure `EFFORT_GUARD_THRESHOLD`.
 - **Verifica dei payload reali**: vedi [TESTING.md](../TESTING.md).
 
 ## Plugin per IntelliJ e gli altri IDE JetBrains

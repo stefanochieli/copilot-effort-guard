@@ -1,0 +1,239 @@
+{
+  "_comment": "Shared by tests/extension.test.mjs (VS Code) and EffortCoreTest.kt (IntelliJ): both extensions must turn the same state.json into the same level, advice and bar.",
+  "views": [
+    {
+      "name": "no state",
+      "state": null,
+      "level": "idle",
+      "action": null,
+      "bar": null,
+      "hint": null
+    },
+    {
+      "name": "clean",
+      "state": {
+        "streak": 0,
+        "threshold": 3,
+        "turn": {},
+        "log": []
+      },
+      "level": "ok",
+      "action": null,
+      "bar": "▱▱▱",
+      "hint": null
+    },
+    {
+      "name": "one struggling turn",
+      "state": {
+        "streak": 1,
+        "threshold": 3,
+        "turn": {},
+        "log": []
+      },
+      "level": "watch",
+      "action": null,
+      "bar": "▰▱▱",
+      "hint": null
+    },
+    {
+      "name": "current turn struggling",
+      "state": {
+        "streak": 0,
+        "threshold": 3,
+        "turn": {
+          "struggled": true,
+          "reason": "tool_error"
+        },
+        "log": []
+      },
+      "level": "watch",
+      "action": null,
+      "bar": "▱▱▱",
+      "hint": null
+    },
+    {
+      "name": "threshold reached",
+      "state": {
+        "streak": 3,
+        "threshold": 3,
+        "turn": {},
+        "log": [],
+        "session": {
+          "source": "vscode-chat",
+          "id": "a"
+        }
+      },
+      "level": "warn",
+      "action": "thinking-up",
+      "bar": "▰▰▰",
+      "hint": "3 struggling turns in a row: raise the thinking / reasoning effort, the task may need more deliberation. (Chat session)"
+    },
+    {
+      "name": "twice the threshold",
+      "state": {
+        "streak": 6,
+        "threshold": 3,
+        "turn": {},
+        "log": []
+      },
+      "level": "warn",
+      "action": "model-up",
+      "bar": "▰▰▰",
+      "hint": "6 struggling turns in a row, more thinking did not help: switch to a more powerful model."
+    },
+    {
+      "name": "long clean run",
+      "state": {
+        "streak": 0,
+        "calm": 8,
+        "calmThreshold": 8,
+        "threshold": 3,
+        "turn": {},
+        "log": [],
+        "session": {
+          "source": "cli",
+          "id": "b"
+        }
+      },
+      "level": "calm",
+      "action": "down",
+      "bar": "▱▱▱",
+      "hint": "8 clean turns in a row, the task looks easy: downgrade to a lighter model or lower the thinking effort to save tokens. (CLI session)"
+    },
+    {
+      "name": "threshold above ten is capped",
+      "state": {
+        "streak": 12,
+        "threshold": 12,
+        "turn": {},
+        "log": []
+      },
+      "level": "warn",
+      "action": "thinking-up",
+      "bar": "▰▰▰▰▰▰▰▰▰▰",
+      "hint": "12 struggling turns in a row: raise the thinking / reasoning effort, the task may need more deliberation."
+    }
+  ],
+  "notify": [
+    {
+      "prev": {
+        "streak": 2
+      },
+      "cur": {
+        "streak": 3,
+        "threshold": 3
+      },
+      "notice": "warn"
+    },
+    {
+      "prev": {
+        "streak": 3
+      },
+      "cur": {
+        "streak": 4,
+        "threshold": 3
+      },
+      "notice": null
+    },
+    {
+      "prev": {
+        "streak": 5
+      },
+      "cur": {
+        "streak": 6,
+        "threshold": 3
+      },
+      "notice": "escalate"
+    },
+    {
+      "prev": {
+        "calm": 7
+      },
+      "cur": {
+        "streak": 0,
+        "calm": 8,
+        "calmThreshold": 8
+      },
+      "notice": "calm"
+    },
+    {
+      "prev": null,
+      "cur": {
+        "streak": 1,
+        "threshold": 3
+      },
+      "notice": null
+    }
+  ],
+  "history": [
+    {
+      "now": "2026-11-10T12:00:00Z",
+      "days": 3,
+      "log": [
+        {
+          "ts": "2026-11-08T09:00:00Z",
+          "struggled": true,
+          "reason": "tool_error"
+        },
+        {
+          "ts": "2026-11-08T23:59:59Z",
+          "struggled": false
+        },
+        {
+          "ts": "2026-11-10T00:00:01Z",
+          "struggled": true,
+          "reason": "test_failure_pattern"
+        },
+        {
+          "ts": "2026-11-10T08:00:00Z",
+          "struggled": true,
+          "reason": "tool_error"
+        },
+        {
+          "ts": "2026-11-01T08:00:00Z",
+          "struggled": true,
+          "reason": "old"
+        },
+        {
+          "ts": "garbage",
+          "struggled": true
+        }
+      ],
+      "expected": [
+        {
+          "day": "2026-11-08",
+          "turns": 2,
+          "struggling": 1
+        },
+        {
+          "day": "2026-11-09",
+          "turns": 0,
+          "struggling": 0
+        },
+        {
+          "day": "2026-11-10",
+          "turns": 2,
+          "struggling": 2
+        }
+      ],
+      "reasons": [
+        [
+          "tool_error",
+          2
+        ],
+        [
+          "test_failure_pattern",
+          1
+        ],
+        [
+          "old",
+          1
+        ],
+        [
+          "unknown",
+          1
+        ]
+      ]
+    }
+  ]
+}
