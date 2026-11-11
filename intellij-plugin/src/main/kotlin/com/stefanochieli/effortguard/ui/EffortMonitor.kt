@@ -79,6 +79,35 @@ class EffortMonitor(private val project: Project) : Disposable {
         }
     }
 
+    /** Asks the two thresholds and writes them in .effort-guard.json, read by the hooks. Runs on the EDT. */
+    fun setThresholds() {
+        val base = project.basePath
+        if (base == null) {
+            show("Open a project folder first.", NotificationType.INFORMATION)
+            return
+        }
+        val folder = java.nio.file.Paths.get(base)
+        val current = EffortCore.readConfig(folder)
+        fun ask(title: String, value: Int, min: Int, max: Int): Int? {
+            val text = com.intellij.openapi.ui.Messages.showInputDialog(
+                project, "$title ($min-$max)", "Effort Guard Thresholds", null, value.toString(),
+                object : com.intellij.openapi.ui.InputValidator {
+                    override fun checkInput(s: String?) = s?.trim()?.toIntOrNull()?.let { it in min..max } == true
+                    override fun canClose(s: String?) = checkInput(s)
+                },
+            ) ?: return null
+            return text.trim().toInt()
+        }
+        val threshold = ask("Struggling turns in a row before the warning", (current["threshold"] as? Number)?.toInt() ?: view.threshold, 1, 100) ?: return
+        val calm = ask("Clean turns in a row before suggesting a lighter model", (current["calmThreshold"] as? Number)?.toInt() ?: view.calmThreshold, 2, 1000) ?: return
+        try {
+            val file = EffortCore.writeConfig(folder, threshold, calm)
+            show("Thresholds $threshold / $calm saved in ${file.fileName}; they apply from the next Copilot event.", NotificationType.INFORMATION)
+        } catch (e: Exception) {
+            show("Could not save the thresholds (${e.message}).", NotificationType.ERROR)
+        }
+    }
+
     private fun notify(notice: Notice?) {
         when (notice) {
             Notice.WARN -> show(view.messages.warn, NotificationType.WARNING)

@@ -153,3 +153,69 @@ test('resetProject writes atomically (no temporary file left)', () => {
   lib.resetProject(dir)
   assert.deepEqual(readdirSync(dir), ['state.json'])
 })
+
+test('shared fixtures: daily history and reasons match the IntelliJ plugin', () => {
+  for (const h of shared.history) {
+    assert.deepEqual(lib.dailyHistory(h.log, h.days, Date.parse(h.now)), h.expected)
+    assert.deepEqual(lib.reasonCounts(h.log).map(r => [r.reason, r.count]), h.reasons)
+  }
+})
+
+test('history chart and buttons are in the panel', () => {
+  const now = new Date().toISOString()
+  const view = lib.computeView({ streak: 0, threshold: 4, calmThreshold: 9, turn: {}, log: [{ ts: now, struggled: true, reason: 'tool_error' }, { ts: now, struggled: false }] })
+  assert.equal(view.history.length, 14)
+  assert.equal(view.history.at(-1).turns, 2)
+  const html = lib.renderHtml(view)
+  assert.match(html, /<svg class="chart"/)
+  assert.match(html, /tool_error: 1/)
+  assert.match(html, /data-msg="thresholds" class="secondary">Thresholds \(4 \/ 9\)/)
+  assert.match(html, /data-msg="csv"/)
+  assert.doesNotMatch(html, /Install hooks/)
+  assert.match(lib.renderHtml({ ...view, hooks: { installed: false } }), /data-msg="install">Install hooks/)
+  assert.match(lib.renderHtml({ ...view, hooks: { installed: true, outdated: true } }), /Update hooks/)
+})
+
+test('thresholds file: validated, merged with other keys', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'eg-cfg-'))
+  writeFileSync(join(dir, '.effort-guard.json'), JSON.stringify({ note: 'team' }))
+  lib.writeConfig(dir, { threshold: 4, calmThreshold: 10 })
+  assert.deepEqual(lib.readConfig(dir), { note: 'team', threshold: 4, calmThreshold: 10 })
+  assert.equal(lib.validateThreshold('4', 1, 100), null)
+  assert.notEqual(lib.validateThreshold('0', 1, 100), null)
+  assert.notEqual(lib.validateThreshold('2.5', 1, 100), null)
+})
+
+test('CSV export: one row per turn, quoted when needed, no commands', () => {
+  const csv = lib.toCsv([{ dir: 'd', state: { cwd: 'C:\\a,b', log: [{ ts: 't1', struggled: true, reason: 'tool_error', streak: 1 }] } }])
+  assert.equal(csv, 'project,timestamp,struggled,reason,streak\n"C:\\a,b",t1,true,tool_error,1\n')
+})
+
+test('hooksStatus: not installed, installed per repo, outdated per-user copy', () => {
+  const home = mkdtempSync(join(tmpdir(), 'eg-hs-'))
+  const bundled = mkdtempSync(join(tmpdir(), 'eg-bundle-'))
+  writeFileSync(join(bundled, 'effort-guard.mjs'), 'new')
+  assert.equal(lib.hooksStatus(home, bundled).installed, false)
+  const repo = mkdtempSync(join(tmpdir(), 'eg-repo-'))
+  mkdirSync(join(repo, '.github', 'hooks'), { recursive: true })
+  writeFileSync(join(repo, '.github', 'hooks', 'effort-guard.json'), '{}')
+  assert.equal(lib.hooksStatus(home, bundled, [repo]).installed, true)
+  mkdirSync(join(home, 'hooks'))
+  writeFileSync(join(home, 'hooks', 'effort-guard.json'), '{}')
+  mkdirSync(join(home, 'effort-guard'))
+  writeFileSync(join(home, 'effort-guard', 'effort-guard.mjs'), 'old')
+  assert.equal(lib.hooksStatus(home, bundled).outdated, true)
+  writeFileSync(join(home, 'effort-guard', 'effort-guard.mjs'), 'new')
+  assert.equal(lib.hooksStatus(home, bundled).outdated, false)
+})
+
+test('the hooks bundled in the extension install and run', async () => {
+  const { execFileSync } = await import('node:child_process')
+  const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
+  execFileSync(process.execPath, [join(root, 'scripts', 'bundle-hooks.mjs')])
+  const home = mkdtempSync(join(tmpdir(), 'eg-inst-'))
+  execFileSync(process.execPath, [join(root, 'vscode-extension', 'hooks', 'scripts', 'install.mjs'), '--user'], { env: { ...process.env, COPILOT_HOME: home } })
+  assert.equal(lib.hooksStatus(home, join(root, 'vscode-extension', 'hooks', 'src')).outdated, false)
+  const out = execFileSync(process.execPath, [join(home, 'effort-guard', 'effort-guard.mjs'), 'selftest'], { env: { ...process.env, COPILOT_HOME: home } }).toString()
+  assert.match(out, /^ok/)
+})

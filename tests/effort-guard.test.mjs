@@ -408,3 +408,18 @@ test('summarisePayloads reports shapes, not values', () => {
   assert.match(g.argKeys, /command/)
   assert.equal(JSON.stringify(g).includes('secret'), false)
 })
+
+import { projectConfig, thresholds } from '../src/effort-guard.mjs'
+
+test('per-project thresholds come from .effort-guard.json in the folder or a parent; env wins', () => {
+  const root = mkdtempSync(join(tmpdir(), 'eg-pc-'))
+  mkdirSync(join(root, 'a', 'b'), { recursive: true })
+  writeFileSync(join(root, '.effort-guard.json'), JSON.stringify({ threshold: 5, calmThreshold: 12 }))
+  const cfg = projectConfig(join(root, 'a', 'b'))
+  assert.equal(cfg.threshold, 5)
+  assert.deepEqual(thresholds({}, cfg), { threshold: 5, calmThreshold: 12 })
+  assert.deepEqual(thresholds({ EFFORT_GUARD_THRESHOLD: '2' }, cfg), { threshold: 2, calmThreshold: 12 })
+  assert.deepEqual(thresholds({}, { threshold: 'x', calmThreshold: 1 }), { threshold: 3, calmThreshold: 8 })
+  writeFileSync(join(root, '.effort-guard.json'), '{broken')
+  assert.deepEqual(projectConfig(root), {})
+})

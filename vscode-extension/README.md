@@ -29,6 +29,18 @@ Gli hook di [copilot-effort-guard](https://github.com/stefanochieli/copilot-effo
 
 Premi **Reset** in fondo al pannello (o il comando *Effort Guard: Reset after changing model or thinking*): le serie ripartono da zero e la valutazione riguarda il nuovo modello. Gli hook non vedono il cambio di modello, quindi senza reset la serie continua a contare.
 
+## Installare gli hook dall'estensione
+
+Gli hook sono inclusi nell'estensione: comando *Effort Guard: Install or update the Copilot hooks* (o il pulsante nel pannello). Esegue l'installazione `--user` con Node.js 20+ preso dal PATH, senza clonare il repository. Se gli hook mancano o sono più vecchi dell'estensione, all'avvio te lo propone una volta.
+
+## Soglie per progetto
+
+Pulsante *Thresholds…* nel pannello (o *Effort Guard: Set thresholds for this project*): scrive `.effort-guard.json` nella cartella del progetto, letto dagli hook dal prossimo evento di Copilot. Puoi committarlo per dare le stesse soglie a tutto il team.
+
+## Storico
+
+Il pannello mostra i turni degli ultimi 14 giorni (in rosso quelli faticosi) e i motivi più frequenti. *Effort Guard: Export history as CSV* esporta tutti i turni registrati di tutti i progetti (data, esito, motivo; nessun comando né output).
+
 ## Sessioni: chat e CLI
 
 Funziona con la chat agente di VS Code e con la Copilot CLI lanciata nel terminale integrato (o in una sua sottocartella). Il consiglio indica da quale sessione viene (`CLI` o `Chat`) e il pannello elenca le sessioni recenti. Le serie sono contate **per cartella** e condivise dalle sessioni di quella cartella: l'estensione non sa quale modello stai usando, osserva soltanto come vanno i turni.

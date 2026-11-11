@@ -160,4 +160,31 @@ class EffortCoreTest {
         assertEquals(listOf("state.json"), Files.list(file.parent).use { s -> s.map { it.fileName.toString() }.toList() })
         assertEquals(0.0, EffortCore.readRaw(file)?.get("streak"))
     }
+
+    @Test
+    fun sharedHistory() {
+        for (h in shared["history"] as List<*>) {
+            val case = h as Map<*, *>
+            val entries = EffortCore.toState(mapOf("log" to case["log"])).entries
+            val days = EffortCore.dailyHistory(entries, (case["days"] as Number).toInt(), Instant.parse(case["now"] as String))
+            val expected = (case["expected"] as List<*>).map {
+                val d = it as Map<*, *>
+                DayCount(d["day"] as String, (d["turns"] as Number).toInt(), (d["struggling"] as Number).toInt())
+            }
+            assertEquals(expected, days)
+            val reasons = (case["reasons"] as List<*>).map { val r = it as List<*>; (r[0] as String) to (r[1] as Number).toInt() }
+            assertEquals(reasons, EffortCore.reasonCounts(entries))
+        }
+    }
+
+    @Test
+    fun thresholdsFileKeepsOtherKeys() {
+        val dir = Files.createTempDirectory("eg-cfg")
+        Files.writeString(dir.resolve(".effort-guard.json"), """{"note":"team"}""")
+        EffortCore.writeConfig(dir, 4, 10)
+        val cfg = EffortCore.readConfig(dir)
+        assertEquals("team", cfg["note"])
+        assertEquals(4.0, cfg["threshold"])
+        assertEquals(10.0, cfg["calmThreshold"])
+    }
 }

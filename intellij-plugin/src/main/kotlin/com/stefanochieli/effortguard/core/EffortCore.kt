@@ -42,6 +42,12 @@ fun sessionKind(source: String?): String? = when {
     else -> null
 }
 
+/** One closed turn of the log: when, whether it struggled, and why. */
+data class LogEntry(val ts: String?, val struggled: Boolean, val reason: String?)
+
+/** Turns and struggling turns of one UTC day (yyyy-MM-dd). */
+data class DayCount(val day: String, val turns: Int, val struggling: Int)
+
 data class EffortState(
     val cwd: String?,
     val streak: Int,
@@ -54,6 +60,7 @@ data class EffortState(
     val updated: String?,
     val session: SessionInfo?,
     val sessions: List<SessionInfo>,
+    val entries: List<LogEntry> = emptyList(),
 )
 
 data class Messages(val warn: String, val escalate: String, val calm: String)
@@ -78,6 +85,8 @@ data class EffortView(
     val cwd: String?,
     val updated: String?,
     val resetAt: String?,
+    val history: List<DayCount> = emptyList(),
+    val reasons: List<Pair<String, Int>> = emptyList(),
 )
 
 /** One state.json found on disk: its folder and the raw JSON (kept whole, so a reset loses nothing). */
@@ -95,7 +104,11 @@ object EffortCore {
 
     fun toState(raw: Map<String, Any?>): EffortState {
         val turn = raw["turn"] as? Map<*, *>
-        val log = (raw["log"] as? List<*>).orEmpty().map { (it as? Map<*, *>)?.get("struggled") == true }
+        val entries = (raw["log"] as? List<*>).orEmpty().map {
+            val e = it as? Map<*, *>
+            LogEntry(e?.get("ts") as? String, e?.get("struggled") == true, e?.get("reason") as? String)
+        }
+        val log = entries.map { it.struggled }
         return EffortState(
             cwd = raw["cwd"] as? String,
             streak = num(raw["streak"]) ?: 0,
@@ -108,6 +121,7 @@ object EffortCore {
             updated = raw["updated"] as? String,
             session = session(raw["session"]),
             sessions = (raw["sessions"] as? List<*>).orEmpty().mapNotNull { session(it) },
+            entries = entries,
         )
     }
 
@@ -277,6 +291,7 @@ object EffortCore {
             action = action, hint = hint, messages = messages,
             kind = kind, session = state.session, sessions = state.sessions,
             cwd = state.cwd, updated = state.updated, resetAt = raw?.get("resetAt") as? String,
+            history = dailyHistory(state.entries), reasons = reasonCounts(state.entries),
         )
     }
 
@@ -291,6 +306,41 @@ object EffortCore {
         if (cur.calm >= calmThreshold && (prev?.calm ?: 0) < calmThreshold) return Notice.CALM
         return null
     }
+
+    /** Turns per UTC day for the last `days` days, oldest first, empty days included (same as lib.js). */
+    fun dailyHistory(entries: List<LogEntry>, days: Int = 14, now: Instant = Instant.now()): List<DayCount> {
+        val today = now.atZone(java.time.ZoneOffset.UTC).toLocalDate()
+        val keys = (days - 1 downTo 0).map { today.minusDays(it.toLong()).toString() }
+        val turns = HashMap<String, Int>()
+        val bad = HashMap<String, Int>()
+        for (e in entries) {
+            val day = try { Instant.parse(e.ts ?: continue).atZone(java.time.ZoneOffset.UTC).toLocalDate().toString() } catch (_: Exception) { continue }
+            turns.merge(day, 1, Int::plus)
+            if (e.struggled) bad.merge(day, 1, Int::plus)
+        }
+        return keys.map { DayCount(it, turns[it] ?: 0, bad[it] ?: 0) }
+    }
+
+    /** Reasons of the struggling turns, most frequent first. */
+    fun reasonCounts(entries: List<LogEntry>): List<Pair<String, Int>> =
+        entries.filter { it.struggled }.groupingBy { it.reason ?: "unknown" }.eachCount()
+            .entries.sortedByDescending { it.value }.map { it.key to it.value }
+
+    const val CONFIG_FILE = ".effort-guard.json"
+
+    /** Per-project thresholds read by the hooks; other keys of the file are kept. */
+    fun writeConfig(folder: Path, threshold: Int, calmThreshold: Int): Path {
+        val file = folder.resolve(CONFIG_FILE)
+        val current = try { Json.parseObject(Files.readString(file)) } catch (_: Exception) { emptyMap() }
+        val next = LinkedHashMap(current)
+        next["threshold"] = threshold
+        next["calmThreshold"] = calmThreshold
+        Files.writeString(file, Json.stringify(next) + "\n")
+        return file
+    }
+
+    fun readConfig(folder: Path): Map<String, Any?> =
+        try { Json.parseObject(Files.readString(folder.resolve(CONFIG_FILE))) } catch (_: Exception) { emptyMap() }
 
     fun ageText(iso: String?, now: Instant = Instant.now()): String {
         if (iso == null) return "-"

@@ -92,6 +92,107 @@ function resetProject(dir, now = new Date()) {
   return next
 }
 
+// --- Hooks installed by the extension -------------------------------------------------
+
+// Are the hooks installed (per user, or per repo in one of the folders), and is the
+// per-user copy older than the one bundled with this extension?
+function hooksStatus(home, bundledSrc, folders = []) {
+  const userFile = path.join(home, 'hooks', 'effort-guard.json')
+  const user = fs.existsSync(userFile)
+  const repo = folders.some(f => fs.existsSync(path.join(f, '.github', 'hooks', 'effort-guard.json')))
+  let outdated = false
+  if (user && bundledSrc) {
+    try {
+      const installed = fs.readFileSync(path.join(home, 'effort-guard', 'effort-guard.mjs'), 'utf8')
+      outdated = installed !== fs.readFileSync(path.join(bundledSrc, 'effort-guard.mjs'), 'utf8')
+    } catch {
+      outdated = fs.existsSync(path.join(bundledSrc, 'effort-guard.mjs'))
+    }
+  }
+  return { installed: user || repo, user, repo, outdated }
+}
+
+// --- Per-project thresholds (.effort-guard.json, read by the hooks) ------------------
+
+const CONFIG_FILE = '.effort-guard.json'
+
+function readConfig(folder) {
+  try {
+    const c = JSON.parse(fs.readFileSync(path.join(folder, CONFIG_FILE), 'utf8').replace(/^\uFEFF/, ''))
+    return c && typeof c === 'object' ? c : {}
+  } catch {
+    return {}
+  }
+}
+
+// Returns an error message, or null when the value is valid.
+function validateThreshold(value, min, max) {
+  const n = Number(value)
+  return Number.isInteger(n) && n >= min && n <= max ? null : `Enter a whole number between ${min} and ${max}.`
+}
+
+// Keeps any other key already in the file.
+function writeConfig(folder, values) {
+  const file = path.join(folder, CONFIG_FILE)
+  const next = { ...readConfig(folder), ...values }
+  fs.writeFileSync(file, JSON.stringify(next, null, 2) + '\n')
+  return { file, config: next }
+}
+
+// --- History ------------------------------------------------------------------------
+
+function dayKey(d) {
+  return new Date(d).toISOString().slice(0, 10)
+}
+
+// Turns and struggling turns per day for the last `days` days (oldest first, empty days included).
+function dailyHistory(log, days = 14, now = Date.now()) {
+  const out = []
+  const index = new Map()
+  for (let i = days - 1; i >= 0; i--) {
+    const day = dayKey(now - i * 86400000)
+    index.set(day, out.length)
+    out.push({ day, turns: 0, struggling: 0 })
+  }
+  for (const e of log ?? []) {
+    if (!e?.ts) continue
+    let k
+    try {
+      k = dayKey(e.ts)
+    } catch {
+      continue
+    }
+    const i = index.get(k)
+    if (i === undefined) continue
+    out[i].turns++
+    if (e.struggled) out[i].struggling++
+  }
+  return out
+}
+
+// Most frequent reasons of struggling turns, most frequent first.
+function reasonCounts(log) {
+  const counts = {}
+  for (const e of log ?? []) if (e?.struggled) counts[e.reason ?? 'unknown'] = (counts[e.reason ?? 'unknown'] ?? 0) + 1
+  return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([reason, count]) => ({ reason, count }))
+}
+
+function csvCell(v) {
+  const s = String(v ?? '')
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+
+// One row per logged turn of every project: no commands, no tool output.
+function toCsv(projects) {
+  const rows = [['project', 'timestamp', 'struggled', 'reason', 'streak']]
+  for (const p of projects) {
+    for (const e of p.state.log ?? []) {
+      rows.push([p.state.cwd ?? p.dir, e.ts ?? '', e.struggled ? 'true' : 'false', e.reason ?? '', e.streak ?? ''])
+    }
+  }
+  return rows.map(r => r.map(csvCell).join(',')).join('\n') + '\n'
+}
+
 // 'vscode-chat' -> Chat, 'cli' / 'cli@vscode' -> CLI.
 function sessionKind(source) {
   return String(source ?? '').startsWith('cli') ? 'CLI' : source === 'vscode-chat' ? 'Chat' : null
@@ -169,6 +270,8 @@ function computeView(state, fallbackThreshold = 3) {
     resetAt: state.resetAt ?? null,
     cwd: state.cwd ?? null,
     updated: state.updated ?? null,
+    history: dailyHistory(log),
+    reasons: reasonCounts(log),
   }
 }
 
@@ -198,6 +301,25 @@ function ageText(iso, now = Date.now()) {
   if (s < 3600) return `${Math.floor(s / 60)} min ago`
   if (s < 86400) return `${Math.floor(s / 3600)} h ago`
   return `${Math.floor(s / 86400)} d ago`
+}
+
+// Bar chart (inline SVG) of the turns per day: struggling turns in red on top of the clean ones.
+function historySvg(history) {
+  const max = Math.max(1, ...history.map(h => h.turns))
+  const w = 12
+  const gap = 4
+  const h = 48
+  const bars = history
+    .map((d, i) => {
+      const x = i * (w + gap)
+      const total = Math.round((d.turns / max) * h)
+      const bad = Math.round((d.struggling / max) * h)
+      const label = `${d.day}: ${d.turns} turns, ${d.struggling} struggling`
+      return `<g><title>${esc(label)}</title><rect x="${x}" y="${h - total}" width="${w}" height="${Math.max(total - bad, 0)}" fill="${LEVEL_HEX.ok}" rx="2"/><rect x="${x}" y="${h - bad}" width="${w}" height="${bad}" fill="${LEVEL_HEX.warn}" rx="2"/>${d.turns === 0 ? `<rect x="${x}" y="${h - 1}" width="${w}" height="1" fill="#8884"/>` : ''}</g>`
+    })
+    .join('')
+  const width = history.length * (w + gap) - gap
+  return `<svg class="chart" viewBox="0 0 ${width} ${h}" width="100%" height="${h}" preserveAspectRatio="none" role="img" aria-label="Turns per day, last ${history.length} days">${bars}</svg>`
 }
 
 // HTML of the side panel: a segmented bar that changes colour with the model's effort level.
@@ -238,6 +360,11 @@ function renderHtml(view, now = Date.now()) {
   button:hover { background: var(--vscode-button-hoverBackground); }
   ul { margin: 4px 0; padding-left: 18px; line-height: 1.5; }
   .meta { margin-top: 12px; line-height: 1.5; }
+  .chart { display: block; margin: 4px 0 2px; }
+  .row { display: flex; gap: 6px; }
+  .row button { margin-top: 6px; }
+  button.secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
+  button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
 </style></head><body>
 <div class="level"><b>${esc(view.label)}</b>${badge}<span class="count">${view.streak}/${view.threshold} struggling turns in a row</span></div>
 <div class="bar">${segs}</div>
@@ -247,9 +374,14 @@ function renderHtml(view, now = Date.now()) {
 <div class="timeline">${dots}</div>
 ${view.hint ? `<div class="hint">${esc(view.hint)}</div>` : ''}
 ${sessions ? `<h4>Sessions in this folder</h4><ul>${sessions}</ul><div class="muted">Streaks are counted per folder, shared by these sessions.</div>` : ''}
-<button id="reset" title="Use it after changing model or thinking effort">Reset after changing model / thinking</button>
+${view.history?.some(d => d.turns) ? `<h4>Last ${view.history.length} days</h4>${historySvg(view.history)}<div class="muted">${esc(view.history[0].day)} \u2192 ${esc(view.history.at(-1).day)} \u00b7 red: struggling turns</div>` : ''}
+${view.reasons?.length ? `<h4>Why it struggled</h4><ul>${view.reasons.map(r => `<li>${esc(r.reason)}: ${r.count}</li>`).join('')}</ul>` : ''}
+${view.hooks && !view.hooks.installed ? `<div class="hint">The Copilot hooks are not installed, so there is nothing to show yet.<button data-msg="install">Install hooks</button></div>` : ''}
+${view.hooks?.outdated ? `<div class="hint">The installed hooks are older than this extension.<button data-msg="install">Update hooks</button></div>` : ''}
+<button id="reset" data-msg="reset" title="Use it after changing model or thinking effort">Reset after changing model / thinking</button>
+<div class="row"><button data-msg="thresholds" class="secondary">Thresholds (${view.threshold} / ${view.calmThreshold})\u2026</button><button data-msg="csv" class="secondary">Export CSV</button></div>
 <div class="meta muted">Session: ${session}<br>Folder: ${esc(view.cwd ?? '-')}<br>Last activity: ${esc(ageText(view.updated, now))}</div>
-<script nonce="${NONCE}">const vs = acquireVsCodeApi(); document.getElementById('reset').addEventListener('click', () => vs.postMessage({ type: 'reset' }))</script>
+<script nonce="${NONCE}">const vs = acquireVsCodeApi(); document.querySelectorAll('button[data-msg]').forEach(b => b.addEventListener('click', () => vs.postMessage({ type: b.dataset.msg })))</script>
 </body></html>`
 }
 
@@ -278,4 +410,4 @@ function formatReport(projects, now = Date.now()) {
     .join('\n\n')
 }
 
-module.exports = { readState, resetProject, sessionKind, copilotHome, readProjects, findState, computeView, levelOf, textBar, renderHtml, shouldNotify, formatReport, isInside, LEVEL_THEME_COLOR, LEVEL_HEX }
+module.exports = { hooksStatus, readConfig, writeConfig, validateThreshold, dailyHistory, reasonCounts, toCsv, historySvg, CONFIG_FILE, readState, resetProject, sessionKind, copilotHome, readProjects, findState, computeView, levelOf, textBar, renderHtml, shouldNotify, formatReport, isInside, LEVEL_THEME_COLOR, LEVEL_HEX }

@@ -55,3 +55,7 @@ La logica in `core/` ha i suoi test (`EffortCoreTest.kt`); l'interfaccia si prov
 ## Release
 
 La versione in `gradle.properties` è aggiornata da release-please insieme al resto del repository. A ogni release il job `publish-intellij-plugin` costruisce lo zip e lo allega alla GitHub Release. Se nei secret del repo c'è `JETBRAINS_PUBLISH_TOKEN` (token di <https://plugins.jetbrains.com/author/me/tokens>), lo stesso job pubblica lo zip anche sul JetBrains Marketplace con `publishPlugin`; ogni versione passa da una breve revisione JetBrains. Il primo upload della scheda va fatto a mano.
+
+## Storico e soglie
+
+La tool window mostra i turni degli ultimi 14 giorni (in rosso quelli faticosi) e i motivi più frequenti. Il pulsante *Thresholds…* scrive `.effort-guard.json` nella cartella del progetto: gli hook lo leggono dal prossimo evento di Copilot.

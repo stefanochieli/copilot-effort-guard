@@ -3,3 +3,4 @@ node_modules/
 *.log
 .effort-guard/
 *.vsix
+vscode-extension/hooks/
