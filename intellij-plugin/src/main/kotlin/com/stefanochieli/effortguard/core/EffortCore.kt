@@ -43,7 +43,18 @@ fun sessionKind(source: String?): String? = when {
 }
 
 /** One closed turn of the log: when, whether it struggled, and why. */
-data class LogEntry(val ts: String?, val struggled: Boolean, val reason: String?)
+data class LogEntry(
+    val ts: String?,
+    val struggled: Boolean,
+    val reason: String?,
+    val tests: String? = null,
+    val rework: Boolean = false,
+    val reedits: Int = 0,
+    val vote: String? = null,
+)
+
+/** Result quality of the last rated turns (same rules as src/quality.mjs and lib.js). */
+data class Quality(val score: Int?, val level: String, val rated: Int, val counts: Map<String, Int>)
 
 /** Turns and struggling turns of one UTC day (yyyy-MM-dd). */
 data class DayCount(val day: String, val turns: Int, val struggling: Int)
@@ -87,6 +98,8 @@ data class EffortView(
     val resetAt: String?,
     val history: List<DayCount> = emptyList(),
     val reasons: List<Pair<String, Int>> = emptyList(),
+    val quality: Quality = EffortCore.qualitySummary(emptyList()),
+    val lastVote: String? = null,
 )
 
 /** One state.json found on disk: its folder and the raw JSON (kept whole, so a reset loses nothing). */
@@ -106,7 +119,11 @@ object EffortCore {
         val turn = raw["turn"] as? Map<*, *>
         val entries = (raw["log"] as? List<*>).orEmpty().map {
             val e = it as? Map<*, *>
-            LogEntry(e?.get("ts") as? String, e?.get("struggled") == true, e?.get("reason") as? String)
+            LogEntry(
+                e?.get("ts") as? String, e?.get("struggled") == true, e?.get("reason") as? String,
+                tests = e?.get("tests") as? String, rework = e?.get("rework") == true,
+                reedits = num(e?.get("reedits")) ?: 0, vote = e?.get("vote") as? String,
+            )
         }
         val log = entries.map { it.struggled }
         return EffortState(
@@ -210,16 +227,8 @@ object EffortCore {
 
     fun resetProject(dir: Path, now: Instant = Instant.now()) {
         val file = dir.resolve("state.json")
-        val next = resetRaw(Json.parseObject(Files.readString(file)), now)
-        // Temporary file + atomic rename: the hooks never read a half-written state.
-        val tmp = file.resolveSibling("state.json.${ProcessHandle.current().pid()}.ide.tmp")
-        Files.writeString(tmp, Json.stringify(next))
-        try {
-            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
-        } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
-            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING)
-        }
-        cache.remove(file)
+        // Temporary file + atomic rename under the hooks' lock: no half-written or lost update.
+        withStateLock(file) { writeAtomic(file, resetRaw(Json.parseObject(Files.readString(file)), now)) }
     }
 
     fun levelOf(state: EffortState?, fallbackThreshold: Int = DEFAULT_THRESHOLD): Level {
@@ -281,6 +290,8 @@ object EffortCore {
         lines.add("Turns logged: ${state.log.size}, struggling: ${state.log.count { it }}")
         if (state.struggling) lines.add("Current turn: struggling (${state.reason})")
         if (hint != null) lines.add(hint)
+        val q = qualitySummary(state.entries)
+        if (q.score != null) lines.add("Result quality: ${q.score}% (${q.level}) over ${q.rated} turns")
         return EffortView(
             level = level,
             text = "${level.emoji} ${textBar(state.streak, threshold)} ${state.streak}/$threshold",
@@ -292,6 +303,7 @@ object EffortCore {
             kind = kind, session = state.session, sessions = state.sessions,
             cwd = state.cwd, updated = state.updated, resetAt = raw?.get("resetAt") as? String,
             history = dailyHistory(state.entries), reasons = reasonCounts(state.entries),
+            quality = qualitySummary(state.entries), lastVote = state.entries.lastOrNull()?.vote,
         )
     }
 
@@ -325,6 +337,94 @@ object EffortCore {
     fun reasonCounts(entries: List<LogEntry>): List<Pair<String, Int>> =
         entries.filter { it.struggled }.groupingBy { it.reason ?: "unknown" }.eachCount()
             .entries.sortedByDescending { it.value }.map { it.key to it.value }
+
+    /** 0..1 for one closed turn; null when there is no signal. A vote overrides the rest. */
+    fun qualityOf(e: LogEntry): Double? {
+        if (e.vote == "up") return 1.0
+        if (e.vote == "down") return 0.0
+        if (e.tests == null && !e.rework && e.reedits == 0) return null
+        var q = 1.0
+        if (e.tests == "red") q -= 0.5
+        if (e.rework) q -= 0.4
+        if (e.reedits > 0) q -= 0.2
+        return maxOf(0.0, Math.round(q * 100) / 100.0)
+    }
+
+    fun qualitySummary(entries: List<LogEntry>, n: Int = 20): Quality {
+        val rated = entries.filter { qualityOf(it) != null }.takeLast(n)
+        val counts = linkedMapOf(
+            "green" to rated.count { it.tests == "green" },
+            "red" to rated.count { it.tests == "red" },
+            "rework" to rated.count { it.rework },
+            "reedits" to rated.count { it.reedits > 0 },
+            "up" to rated.count { it.vote == "up" },
+            "down" to rated.count { it.vote == "down" },
+        )
+        if (rated.isEmpty()) return Quality(null, "unknown", 0, counts)
+        val score = Math.round(rated.sumOf { qualityOf(it)!! } / rated.size * 100).toInt()
+        val level = when {
+            score >= 75 -> "good"
+            score >= 50 -> "fair"
+            else -> "poor"
+        }
+        return Quality(score, level, rated.size, counts)
+    }
+
+    /** Same lock as the hooks: a directory next to state.json. Gives up after ~1.5 s. */
+    private fun <T> withStateLock(file: Path, fn: () -> T): T {
+        val lock = file.resolveSibling(file.fileName.toString() + ".lock")
+        var held = false
+        var i = 0
+        while (i < 75 && !held) {
+            try {
+                Files.createDirectory(lock)
+                held = true
+            } catch (_: Exception) {
+                try {
+                    if (System.currentTimeMillis() - Files.getLastModifiedTime(lock).toMillis() > 5000) {
+                        Files.deleteIfExists(lock)
+                        continue
+                    }
+                } catch (_: Exception) {
+                }
+                Thread.sleep(20)
+            }
+            i++
+        }
+        try {
+            return fn()
+        } finally {
+            if (held) try { Files.deleteIfExists(lock) } catch (_: Exception) {}
+        }
+    }
+
+    private fun writeAtomic(file: Path, raw: Map<String, Any?>) {
+        val tmp = file.resolveSibling("state.json.${ProcessHandle.current().pid()}.ide.tmp")
+        Files.writeString(tmp, Json.stringify(raw))
+        try {
+            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+            Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING)
+        }
+        cache.remove(file)
+    }
+
+    /** Puts "up" or "down" on the last closed turn; the same vote again removes it. Returns the vote now set. */
+    fun voteLast(dir: Path, vote: String): String? {
+        val file = dir.resolve("state.json")
+        return withStateLock(file) {
+            val raw = LinkedHashMap(Json.parseObject(Files.readString(file)))
+            val log = (raw["log"] as? List<*>)?.toMutableList() ?: return@withStateLock null
+            if (log.isEmpty()) return@withStateLock null
+            val last = LinkedHashMap((log.last() as? Map<*, *>)?.entries?.associate { it.key.toString() to it.value } ?: emptyMap())
+            val next = if (last["vote"] == vote) null else vote
+            if (next == null) last.remove("vote") else last["vote"] = next
+            log[log.size - 1] = last
+            raw["log"] = log
+            writeAtomic(file, raw)
+            next
+        }
+    }
 
     const val CONFIG_FILE = ".effort-guard.json"
 

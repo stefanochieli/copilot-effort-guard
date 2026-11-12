@@ -178,6 +178,10 @@ class EffortPanel(project: Project) : JPanel(BorderLayout()), Disposable {
     private val metaArea = JTextArea()
     private val resetButton = JButton("Reset after changing model / thinking")
     private val thresholdsButton = JButton("Thresholds…")
+    private val qualityLabel = JBLabel()
+    private val qualityDetail = JBLabel()
+    private val voteUp = JButton("\uD83D\uDC4D Good result")
+    private val voteDown = JButton("\uD83D\uDC4E Bad result")
     private val historyTitle = JBLabel()
     private val history = HistoryChart()
     private val reasonsArea = JTextArea()
@@ -223,6 +227,14 @@ class EffortPanel(project: Project) : JPanel(BorderLayout()), Disposable {
         thresholdsButton.toolTipText = "Writes .effort-guard.json in the project: the hooks use it from the next Copilot event."
         thresholdsButton.addActionListener { monitor.setThresholds() }
         history.toolTipText = ""
+        voteUp.toolTipText = "The last turn gave a good result (click again to remove the vote)"
+        voteDown.toolTipText = "The last turn gave a bad result (click again to remove the vote)"
+        voteUp.addActionListener { monitor.vote("up") }
+        voteDown.addActionListener { monitor.vote("down") }
+        qualityLabel.font = qualityLabel.font.deriveFont(java.awt.Font.BOLD, qualityLabel.font.size2D + 1f)
+        qualityLabel.alignmentX = LEFT_ALIGNMENT
+        qualityDetail.alignmentX = LEFT_ALIGNMENT
+        qualityDetail.foreground = UIUtil.getContextHelpForeground()
         reasonsArea.foreground = UIUtil.getContextHelpForeground()
 
         fun title(text: String) = JBLabel(text).apply {
@@ -240,6 +252,17 @@ class EffortPanel(project: Project) : JPanel(BorderLayout()), Disposable {
         column.add(title("CLEAN RUN"))
         column.add(calmTitle)
         column.add(calmBar)
+        column.add(title("RESULT QUALITY"))
+        column.add(qualityLabel)
+        column.add(qualityDetail)
+        val votes = JPanel(FlowLayout(FlowLayout.LEFT, 0, JBUI.scale(4))).apply {
+            isOpaque = false
+            alignmentX = LEFT_ALIGNMENT
+            add(voteUp)
+            add(voteDown)
+        }
+        votes.maximumSize = Dimension(Int.MAX_VALUE, votes.preferredSize.height)
+        column.add(votes)
         column.add(title("LAST TURNS"))
         column.add(timeline)
         column.add(JPanel().apply { isOpaque = false; preferredSize = Dimension(0, JBUI.scale(8)); maximumSize = preferredSize })
@@ -290,6 +313,33 @@ class EffortPanel(project: Project) : JPanel(BorderLayout()), Disposable {
             BorderFactory.createMatteBorder(0, 3, 0, 0, color),
             JBUI.Borders.empty(6, 8),
         )
+        val q = view.quality
+        val qColor = when (q.level) {
+            "good" -> Level.OK.hex
+            "fair" -> Level.WATCH.hex
+            "poor" -> Level.WARN.hex
+            else -> Level.IDLE.hex
+        }
+        val qLabel = mapOf("good" to "Good", "fair" to "Mixed", "poor" to "Poor")[q.level] ?: "No signal yet"
+        qualityLabel.text = qLabel + (q.score?.let { " $it%" } ?: "")
+        qualityLabel.foreground = hex(qColor)
+        val c = q.counts
+        val parts = listOfNotNull(
+            c["green"]?.takeIf { it > 0 }?.let { "$it green tests" },
+            c["red"]?.takeIf { it > 0 }?.let { "$it red tests" },
+            c["rework"]?.takeIf { it > 0 }?.let { "$it asked to redo" },
+            c["reedits"]?.takeIf { it > 0 }?.let { "$it re-edited files" },
+            c["up"]?.takeIf { it > 0 }?.let { "$it \uD83D\uDC4D" },
+            c["down"]?.takeIf { it > 0 }?.let { "$it \uD83D\uDC4E" },
+        )
+        qualityDetail.text = if (q.rated == 0) "From tests, follow-up prompts, re-edits and votes" else "Last ${q.rated} rated turns: " + parts.joinToString(" · ")
+        val canVote = view.timeline.isNotEmpty()
+        voteUp.isEnabled = canVote
+        voteDown.isEnabled = canVote
+        voteUp.isSelected = view.lastVote == "up"
+        voteDown.isSelected = view.lastVote == "down"
+        voteUp.font = voteUp.font.deriveFont(if (view.lastVote == "up") java.awt.Font.BOLD else java.awt.Font.PLAIN)
+        voteDown.font = voteDown.font.deriveFont(if (view.lastVote == "down") java.awt.Font.BOLD else java.awt.Font.PLAIN)
         history.days = view.history
         val total = view.history.sumOf { it.turns }
         historyTitle.text = if (total == 0) "No turns in the last 14 days" else "$total turns, ${view.history.sumOf { it.struggling }} struggling (red)"

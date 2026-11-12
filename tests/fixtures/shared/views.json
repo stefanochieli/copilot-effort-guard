@@ -235,5 +235,128 @@
         ]
       ]
     }
-  ]
+  ],
+  "quality": {
+    "entries": [
+      {
+        "entry": {
+          "struggled": false
+        },
+        "quality": null
+      },
+      {
+        "entry": {
+          "tests": "green"
+        },
+        "quality": 1
+      },
+      {
+        "entry": {
+          "tests": "red"
+        },
+        "quality": 0.5
+      },
+      {
+        "entry": {
+          "tests": "red",
+          "rework": true
+        },
+        "quality": 0.1
+      },
+      {
+        "entry": {
+          "tests": "green",
+          "reedits": 2
+        },
+        "quality": 0.8
+      },
+      {
+        "entry": {
+          "rework": true,
+          "reedits": 1
+        },
+        "quality": 0.4
+      },
+      {
+        "entry": {
+          "tests": "red",
+          "rework": true,
+          "reedits": 1
+        },
+        "quality": 0
+      },
+      {
+        "entry": {
+          "tests": "red",
+          "vote": "up"
+        },
+        "quality": 1
+      },
+      {
+        "entry": {
+          "tests": "green",
+          "vote": "down"
+        },
+        "quality": 0
+      }
+    ],
+    "summaries": [
+      {
+        "log": [],
+        "score": null,
+        "level": "unknown",
+        "rated": 0
+      },
+      {
+        "log": [
+          {
+            "tests": "green"
+          },
+          {
+            "struggled": true
+          },
+          {
+            "tests": "green",
+            "reedits": 1
+          }
+        ],
+        "score": 90,
+        "level": "good",
+        "rated": 2
+      },
+      {
+        "log": [
+          {
+            "tests": "red"
+          },
+          {
+            "tests": "green"
+          },
+          {
+            "rework": true
+          }
+        ],
+        "score": 70,
+        "level": "fair",
+        "rated": 3
+      },
+      {
+        "log": [
+          {
+            "tests": "red",
+            "rework": true
+          },
+          {
+            "vote": "down"
+          },
+          {
+            "tests": "green"
+          }
+        ],
+        "score": 37,
+        "level": "poor",
+        "rated": 3
+      }
+    ]
+  }
 }

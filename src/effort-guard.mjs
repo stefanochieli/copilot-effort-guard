@@ -18,6 +18,7 @@ import { createHash } from 'node:crypto'
 import { looksLikeTestFailure, isTestCommand, isTestSuccess, exitCodeOf, ignoresExitCode } from './detect.mjs'
 import { formatDoctor, renderBar } from './report.mjs'
 import { redact, clip } from './redact.mjs'
+import { isEditTool, editedFiles, looksLikeRework, qualitySummary } from './quality.mjs'
 
 const DEFAULT_THRESHOLD = 3
 const DEFAULT_CALM = 8
@@ -52,6 +53,7 @@ export function readTool(payload) {
     tool: pick(payload, 'toolName', 'tool_name') ?? '',
     command: pick(parsed, 'command', 'cmd') ?? '',
     text: typeof text === 'string' ? text : JSON.stringify(text),
+    args: parsed && typeof parsed === 'object' ? parsed : {},
   }
 }
 
@@ -145,26 +147,38 @@ export function onTool(state, payload, { failed: failedEvent = false } = {}) {
   if (errorContext !== undefined && errorContext !== 'tool_execution') {
     return state
   }
-  const { tool, command, text, resultType } = readTool(payload)
+  const { tool, command, text, resultType, args } = readTool(payload)
   const failed = failedEvent || resultType === 'failure'
   const isShell = /^(bash|shell|powershell|pwsh|run_in_terminal|runInTerminal|terminal|execute)/i.test(tool)
 
+  // Quality signals of the turn (they never change the streak): files written and the
+  // outcome of the last test/build command.
+  const quality = {}
+  if (!failed && isEditTool(tool)) {
+    const files = editedFiles(args)
+    if (files.length) quality.files = [...new Set([...(state.turn.files ?? []), ...files])].slice(0, 200)
+  }
+
   if (!isShell && !failed) {
-    return state
+    return quality.files ? { ...state, turn: { ...state.turn, ...quality } } : state
   }
 
   const result = pick(payload, 'toolResult', 'tool_response', 'toolResponse', 'tool_result')
   const exitCode = isShell ? exitCodeOf(result && typeof result === 'object' ? result : {}, text) : null
   const badExit = exitCode !== null && exitCode !== 0 && !ignoresExitCode(command)
   const reason = failed ? 'tool_error' : looksLikeTestFailure(command, text) ? 'test_failure_pattern' : badExit ? 'exit_code' : null
+  if (isShell && isTestCommand(command)) {
+    quality.tests = isTestSuccess(command, text, exitCode) && !failed ? 'green' : 'red'
+  }
+  const keep = { files: state.turn.files, tests: state.turn.tests, ...quality }
 
   if (!reason) {
     // Red then green in the same turn (TDD, or a fix that worked) is not a struggle.
     // EFFORT_GUARD_RED_GREEN=0 turns this off.
     if (state.turn.struggled && state.turn.test && isShell && process.env.EFFORT_GUARD_RED_GREEN !== '0' && isTestSuccess(command, text, exitCode)) {
-      return { ...state, turn: { struggled: false, reason: null, command: null } }
+      return { ...state, turn: { struggled: false, reason: null, command: null, ...keep } }
     }
-    return state
+    return quality.tests || quality.files ? { ...state, turn: { ...state.turn, ...keep } } : state
   }
 
   // What is kept is a short, redacted copy: the full command line can hold a token.
@@ -174,8 +188,16 @@ export function onTool(state, payload, { failed: failedEvent = false } = {}) {
   return {
     ...state,
     // `test`: the struggle came from a test/build command, so a later green run of one clears it.
-    turn: { struggled: true, reason: repeated ? 'repeated_error' : reason, command: kept || state.turn.command, test: isTestCommand(command) || (state.turn.struggled && state.turn.test) || undefined },
+    turn: { struggled: true, reason: repeated ? 'repeated_error' : reason, command: kept || state.turn.command, test: isTestCommand(command) || (state.turn.struggled && state.turn.test) || undefined, ...keep },
   }
+}
+
+// Files written in this turn that one of the last RECENT_TURNS turns had written too.
+const RECENT_TURNS = 3
+function reedits(files, recent) {
+  if (!files?.length || !Array.isArray(recent)) return 0
+  const seen = new Set(recent.flat())
+  return files.filter(f => seen.has(f)).length
 }
 
 // Closes the previous turn: updates the streak and log. Returns the warning to
@@ -194,6 +216,11 @@ export function closeTurn(state, threshold, now = new Date(), calmThreshold = DE
       ? `effort-guard: ${calm} clean turns in a row. The task looks easy: downgrade to a lighter model or lower the thinking effort to save tokens.`
       : null
   const entry = { ts: now.toISOString(), struggled, reason, streak }
+  const { tests, files } = state.turn
+  if (tests) entry.tests = tests
+  const again = reedits(files, state.recentFiles)
+  if (again) entry.reedits = again
+  const recentFiles = files?.length ? [...(state.recentFiles ?? []), files].slice(-RECENT_TURNS) : (state.recentFiles ?? []).slice(-RECENT_TURNS)
   // Two steps: first more thinking, then (if the streak keeps growing) a stronger model.
   const where = `${streak} struggling turns in a row (failed commands/tests)${command ? `, last: ${command.slice(0, 60)}` : ''}.`
   const warning =
@@ -211,6 +238,7 @@ export function closeTurn(state, threshold, now = new Date(), calmThreshold = DE
       calm,
       log: [...state.log, entry].slice(-LOG_LIMIT),
       pendingWarning: warning,
+      recentFiles,
     },
     warning,
     notice,
@@ -229,7 +257,9 @@ export function summary(state) {
   }
   const top = Object.entries(reasons).sort((a, b) => b[1] - a[1])[0]
 
-  return `effort-guard: ${state.log.length} turns, ${struggled.length} struggling${top ? ` (most common: ${top[0]})` : ''}.`
+  const q = qualitySummary(state.log)
+  const quality = q.score === null ? '' : ` Result quality ${q.score}% (${q.level}, ${q.rated} rated turns).`
+  return `effort-guard: ${state.log.length} turns, ${struggled.length} struggling${top ? ` (most common: ${top[0]})` : ''}.${quality}`
 }
 
 // Per-project thresholds: `.effort-guard.json` in the working directory or one of its
@@ -477,7 +507,12 @@ export function run(event, payload, state, threshold, now = new Date(), calmThre
       return { state, stderr: null, stdout: null, notice: null, duplicate: true }
     }
     const closed = closeTurn(state, threshold, now, calmThreshold)
-    return { state: key ? { ...closed.state, lastPromptKey: key } : closed.state, stderr: closed.warning, stdout: null, notice: closed.notice }
+    let next = key ? { ...closed.state, lastPromptKey: key } : closed.state
+    // A prompt asking to fix or redo marks the turn it reacts to (the one just closed).
+    if (next.log.length && looksLikeRework(pick(payload, 'prompt', 'user_prompt', 'userPrompt'))) {
+      next = { ...next, log: [...next.log.slice(0, -1), { ...next.log.at(-1), rework: true }] }
+    }
+    return { state: next, stderr: closed.warning, stdout: null, notice: closed.notice }
   }
 
   if (event === 'tool' || event === 'failure') {

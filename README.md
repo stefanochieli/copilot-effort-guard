@@ -9,6 +9,17 @@ Hook per **GitHub Copilot** (Copilot CLI e agent hooks di VS Code) che osserva i
 - **Stato**: `.effort-guard/state.json` (l'installazione per repository aggiunge `.effort-guard/` al `.gitignore` del repo, salvo `--no-gitignore`); cartella cambiabile con `EFFORT_GUARD_DIR`, soglia con `EFFORT_GUARD_THRESHOLD`. Soglie per progetto: `.effort-guard.json` (`{"threshold": 4, "calmThreshold": 10}`) nella cartella o in una cartella superiore, scritto anche dalle estensioni e committabile per condividerlo col team; le variabili d'ambiente hanno la precedenza.
 - `npm run summary` stampa il riepilogo dei turni.
 
+## Qualità del risultato
+
+Accanto allo sforzo, ogni turno chiuso registra segnali sulla qualità del risultato (non cambiano la serie):
+
+- **test**: esito dell'ultimo comando di test/build del turno (`green` / `red`);
+- **rilavorazione**: il prompt successivo chiede di correggere o rifare ("non funziona", "rifai", "still failing", "revert"…); il testo del prompt viene solo classificato, mai salvato;
+- **ritocchi**: file modificati di nuovo che uno dei 3 turni precedenti aveva già modificato (si salvano hash brevi dei percorsi, non i percorsi);
+- **voto**: 👍/👎 dal pannello delle estensioni, che prevale sugli altri segnali.
+
+Punteggio per turno: 100% meno 50 per test rossi, 40 per rilavorazione, 20 per ritocchi; il pannello mostra la media degli ultimi 20 turni con un segnale (buona ≥ 75%, mista ≥ 50%). I nomi dei tool di modifica non sono ancora confermati su una cattura reale: `payloads` li mostra.
+
 ## Uso
 
 Documentazione: [setup](docs/SETUP.md), [funzionamento](docs/FUNZIONAMENTO.md), [prove sul tuo Copilot](TESTING.md). In breve: `node scripts/install.mjs --user` (globale, CLI e VS Code) oppure `node scripts/install.mjs <repo>` (team).

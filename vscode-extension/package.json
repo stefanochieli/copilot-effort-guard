@@ -51,6 +51,14 @@
       {
         "command": "effortGuard.exportCsv",
         "title": "Effort Guard: Export history as CSV"
+      },
+      {
+        "command": "effortGuard.voteUp",
+        "title": "Effort Guard: The last result was good"
+      },
+      {
+        "command": "effortGuard.voteDown",
+        "title": "Effort Guard: The last result was bad"
       }
     ],
     "configuration": {

@@ -59,3 +59,7 @@ La versione in `gradle.properties` è aggiornata da release-please insieme al re
 ## Storico e soglie
 
 La tool window mostra i turni degli ultimi 14 giorni (in rosso quelli faticosi) e i motivi più frequenti. Il pulsante *Thresholds…* scrive `.effort-guard.json` nella cartella del progetto: gli hook lo leggono dal prossimo evento di Copilot.
+
+## Qualità del risultato
+
+Sezione *Result quality* della tool window: punteggio degli ultimi turni (esito dei test, richieste di rifare, file ritoccati, voti) e pulsanti 👍/👎 per votare l'ultimo turno chiuso.

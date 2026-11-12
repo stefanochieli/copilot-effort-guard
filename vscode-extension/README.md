@@ -37,6 +37,10 @@ Gli hook sono inclusi nell'estensione: comando *Effort Guard: Install or update 
 
 Pulsante *Thresholds…* nel pannello (o *Effort Guard: Set thresholds for this project*): scrive `.effort-guard.json` nella cartella del progetto, letto dagli hook dal prossimo evento di Copilot. Puoi committarlo per dare le stesse soglie a tutto il team.
 
+## Qualità del risultato
+
+Sezione *Result quality* del pannello: punteggio degli ultimi turni calcolato da esito dei test, richieste di rifare nel prompt successivo, file ritoccati più volte e dal tuo voto. I pulsanti 👍 *Good result* / 👎 *Bad result* (o i comandi *Effort Guard: The last result was good/bad*) votano l'ultimo turno chiuso; un secondo clic toglie il voto. Il CSV esportato contiene anche questi campi.
+
 ## Storico
 
 Il pannello mostra i turni degli ultimi 14 giorni (in rosso quelli faticosi) e i motivi più frequenti. *Effort Guard: Export history as CSV* esporta tutti i turni registrati di tutti i progetti (data, esito, motivo; nessun comando né output).
