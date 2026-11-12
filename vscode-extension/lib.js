@@ -85,10 +85,7 @@ function resetProject(dir, now = new Date()) {
     resetAt: now.toISOString(),
   }
   // Temporary file + rename: the hooks never read a half-written state.
-  const tmp = `${file}.${process.pid}.ext.tmp`
-  fs.writeFileSync(tmp, JSON.stringify(next))
-  fs.renameSync(tmp, file)
-  stateCache.delete(file)
+  withStateLock(file, () => writeStateAtomic(file, next))
   return next
 }
 
@@ -139,6 +136,92 @@ function writeConfig(folder, values) {
   return { file, config: next }
 }
 
+// --- Result quality (mirrors src/quality.mjs and EffortCore.kt) -----------------------
+
+// 0..1 for one closed turn; null when there is no signal. A vote overrides the rest.
+function qualityOf(entry) {
+  if (!entry) return null
+  if (entry.vote === 'up') return 1
+  if (entry.vote === 'down') return 0
+  if (!(entry.tests || entry.rework || entry.reedits)) return null
+  let q = 1
+  if (entry.tests === 'red') q -= 0.5
+  if (entry.rework) q -= 0.4
+  if (entry.reedits) q -= 0.2
+  return Math.max(0, Math.round(q * 100) / 100)
+}
+
+function qualitySummary(log, n = 20) {
+  const rated = (log ?? []).filter(e => qualityOf(e) !== null).slice(-n)
+  const counts = { green: 0, red: 0, rework: 0, reedits: 0, up: 0, down: 0 }
+  for (const e of rated) {
+    if (e.tests === 'green') counts.green++
+    if (e.tests === 'red') counts.red++
+    if (e.rework) counts.rework++
+    if (e.reedits) counts.reedits++
+    if (e.vote === 'up') counts.up++
+    if (e.vote === 'down') counts.down++
+  }
+  if (!rated.length) return { score: null, level: 'unknown', rated: 0, counts }
+  const score = Math.round((rated.reduce((s, e) => s + qualityOf(e), 0) / rated.length) * 100)
+  return { score, level: score >= 75 ? 'good' : score >= 50 ? 'fair' : 'poor', rated: rated.length, counts }
+}
+
+const QUALITY_HEX = { good: '#3fb950', fair: '#d29922', poor: '#f85149', unknown: '#8b949e' }
+
+// Same lock as the hooks (a directory next to state.json), so a write from the IDE
+// never interleaves with a hook's read-modify-write. Gives up after ~1.5 s.
+function withStateLock(file, fn) {
+  const lock = `${file}.lock`
+  let held = false
+  for (let i = 0; i < 75 && !held; i++) {
+    try {
+      fs.mkdirSync(lock)
+      held = true
+    } catch {
+      try {
+        if (Date.now() - fs.statSync(lock).mtimeMs > 5000) {
+          fs.rmdirSync(lock)
+          continue
+        }
+      } catch {}
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20)
+    }
+  }
+  try {
+    return fn()
+  } finally {
+    if (held) {
+      try {
+        fs.rmdirSync(lock)
+      } catch {}
+    }
+  }
+}
+
+function writeStateAtomic(file, state) {
+  const tmp = `${file}.${process.pid}.ext.tmp`
+  fs.writeFileSync(tmp, JSON.stringify(state))
+  fs.renameSync(tmp, file)
+  stateCache.delete(file)
+}
+
+// Puts 'up' or 'down' on the last closed turn (the same vote again removes it).
+function voteLast(dir, vote) {
+  const file = path.join(dir, 'state.json')
+  return withStateLock(file, () => {
+    const state = JSON.parse(fs.readFileSync(file, 'utf8'))
+    const log = Array.isArray(state.log) ? [...state.log] : []
+    if (!log.length) return null
+    const last = { ...log[log.length - 1] }
+    if (last.vote === vote) delete last.vote
+    else last.vote = vote
+    log[log.length - 1] = last
+    writeStateAtomic(file, { ...state, log })
+    return last.vote ?? null
+  })
+}
+
 // --- History ------------------------------------------------------------------------
 
 function dayKey(d) {
@@ -184,10 +267,11 @@ function csvCell(v) {
 
 // One row per logged turn of every project: no commands, no tool output.
 function toCsv(projects) {
-  const rows = [['project', 'timestamp', 'struggled', 'reason', 'streak']]
+  const rows = [['project', 'timestamp', 'struggled', 'reason', 'streak', 'tests', 'rework', 'reedits', 'vote', 'quality']]
   for (const p of projects) {
     for (const e of p.state.log ?? []) {
-      rows.push([p.state.cwd ?? p.dir, e.ts ?? '', e.struggled ? 'true' : 'false', e.reason ?? '', e.streak ?? ''])
+      const q = qualityOf(e)
+      rows.push([p.state.cwd ?? p.dir, e.ts ?? '', e.struggled ? 'true' : 'false', e.reason ?? '', e.streak ?? '', e.tests ?? '', e.rework ? 'true' : '', e.reedits ?? '', e.vote ?? '', q === null ? '' : q])
     }
   }
   return rows.map(r => r.map(csvCell).join(',')).join('\n') + '\n'
@@ -247,6 +331,8 @@ function computeView(state, fallbackThreshold = 3) {
   const base = action === 'model-up' ? messages.escalate : action === 'thinking-up' ? messages.warn : action === 'down' ? messages.calm : null
   const hint = base ? base + tag : null
   if (hint) lines.push(hint)
+  const q = qualitySummary(log)
+  if (q.score !== null) lines.push(`Result quality: ${q.score}% (${q.level}) over ${q.rated} turns`)
   const icon = level === 'warn' ? 'warning' : level === 'calm' ? 'check' : 'pulse'
   return {
     level,
@@ -272,6 +358,8 @@ function computeView(state, fallbackThreshold = 3) {
     updated: state.updated ?? null,
     history: dailyHistory(log),
     reasons: reasonCounts(log),
+    quality: qualitySummary(log),
+    lastVote: log.length ? log[log.length - 1].vote ?? null : null,
   }
 }
 
@@ -322,6 +410,29 @@ function historySvg(history) {
   return `<svg class="chart" viewBox="0 0 ${width} ${h}" width="100%" height="${h}" preserveAspectRatio="none" role="img" aria-label="Turns per day, last ${history.length} days">${bars}</svg>`
 }
 
+const QUALITY_LABEL = { good: 'Good', fair: 'Mixed', poor: 'Poor', unknown: 'No signal yet' }
+
+// Result quality: score of the last rated turns, what it is made of, and the vote buttons.
+function qualityHtml(view) {
+  const q = view.quality
+  if (!q) return ''
+  const c = q.counts
+  const parts = [
+    c.green && `${c.green} green tests`,
+    c.red && `${c.red} red tests`,
+    c.rework && `${c.rework} asked to redo`,
+    c.reedits && `${c.reedits} re-edited files`,
+    c.up && `${c.up} \u{1F44D}`,
+    c.down && `${c.down} \u{1F44E}`,
+  ].filter(Boolean)
+  const score = q.score === null ? '-' : `${q.score}%`
+  const canVote = (view.timeline ?? []).length > 0
+  return `<h4>Result quality</h4>
+<div class="quality"><b style="color:${QUALITY_HEX[q.level]}">${esc(QUALITY_LABEL[q.level])} ${esc(score)}</b> <span class="muted">${q.rated ? `last ${q.rated} rated turns` : 'tests, follow-up prompts, re-edits and votes'}</span></div>
+${parts.length ? `<div class="muted">${esc(parts.join(' \u00b7 '))}</div>` : ''}
+${canVote ? `<div class="row vote"><button data-msg="vote-up" class="secondary${view.lastVote === 'up' ? ' on' : ''}" title="The last turn gave a good result">\u{1F44D} Good result</button><button data-msg="vote-down" class="secondary${view.lastVote === 'down' ? ' on' : ''}" title="The last turn gave a bad result">\u{1F44E} Bad result</button></div>` : ''}`
+}
+
 // HTML of the side panel: a segmented bar that changes colour with the model's effort level.
 function renderHtml(view, now = Date.now()) {
   const color = LEVEL_HEX[view.level]
@@ -361,6 +472,8 @@ function renderHtml(view, now = Date.now()) {
   ul { margin: 4px 0; padding-left: 18px; line-height: 1.5; }
   .meta { margin-top: 12px; line-height: 1.5; }
   .chart { display: block; margin: 4px 0 2px; }
+  .quality b { font-size: 1.1em; }
+  .vote button.on { outline: 2px solid var(--c); }
   .row { display: flex; gap: 6px; }
   .row button { margin-top: 6px; }
   button.secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
@@ -370,6 +483,7 @@ function renderHtml(view, now = Date.now()) {
 <div class="bar">${segs}</div>
 <h4>Clean run (${view.calm}/${view.calmThreshold})</h4>
 <div class="calm"><i></i></div>
+${qualityHtml(view)}
 <h4>Last turns</h4>
 <div class="timeline">${dots}</div>
 ${view.hint ? `<div class="hint">${esc(view.hint)}</div>` : ''}
@@ -410,4 +524,4 @@ function formatReport(projects, now = Date.now()) {
     .join('\n\n')
 }
 
-module.exports = { hooksStatus, readConfig, writeConfig, validateThreshold, dailyHistory, reasonCounts, toCsv, historySvg, CONFIG_FILE, readState, resetProject, sessionKind, copilotHome, readProjects, findState, computeView, levelOf, textBar, renderHtml, shouldNotify, formatReport, isInside, LEVEL_THEME_COLOR, LEVEL_HEX }
+module.exports = { qualityOf, qualitySummary, voteLast, QUALITY_HEX, hooksStatus, readConfig, writeConfig, validateThreshold, dailyHistory, reasonCounts, toCsv, historySvg, CONFIG_FILE, readState, resetProject, sessionKind, copilotHome, readProjects, findState, computeView, levelOf, textBar, renderHtml, shouldNotify, formatReport, isInside, LEVEL_THEME_COLOR, LEVEL_HEX }

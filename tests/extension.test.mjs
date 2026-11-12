@@ -188,7 +188,7 @@ test('thresholds file: validated, merged with other keys', () => {
 
 test('CSV export: one row per turn, quoted when needed, no commands', () => {
   const csv = lib.toCsv([{ dir: 'd', state: { cwd: 'C:\\a,b', log: [{ ts: 't1', struggled: true, reason: 'tool_error', streak: 1 }] } }])
-  assert.equal(csv, 'project,timestamp,struggled,reason,streak\n"C:\\a,b",t1,true,tool_error,1\n')
+  assert.equal(csv, 'project,timestamp,struggled,reason,streak,tests,rework,reedits,vote,quality\n"C:\\a,b",t1,true,tool_error,1,,,,,\n')
 })
 
 test('hooksStatus: not installed, installed per repo, outdated per-user copy', () => {
@@ -218,4 +218,32 @@ test('the hooks bundled in the extension install and run', async () => {
   assert.equal(lib.hooksStatus(home, join(root, 'vscode-extension', 'hooks', 'src')).outdated, false)
   const out = execFileSync(process.execPath, [join(home, 'effort-guard', 'effort-guard.mjs'), 'selftest'], { env: { ...process.env, COPILOT_HOME: home } }).toString()
   assert.match(out, /^ok/)
+})
+
+test('shared fixtures: result quality matches the hooks and the IntelliJ plugin', async () => {
+  const hooks = await import('../src/quality.mjs')
+  for (const c of shared.quality.entries) {
+    assert.equal(lib.qualityOf(c.entry), c.quality, JSON.stringify(c.entry))
+    assert.equal(hooks.qualityOf(c.entry), c.quality, JSON.stringify(c.entry))
+  }
+  for (const c of shared.quality.summaries) {
+    for (const q of [lib.qualitySummary(c.log), hooks.qualitySummary(c.log)]) {
+      assert.deepEqual([q.score, q.level, q.rated], [c.score, c.level, c.rated], JSON.stringify(c.log))
+    }
+  }
+})
+
+test('quality in the panel and votes on the last turn', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'eg-vote-'))
+  writeFileSync(join(dir, 'state.json'), JSON.stringify({ streak: 0, turn: {}, log: [{ ts: 't', struggled: false, tests: 'red' }] }))
+  assert.equal(lib.voteLast(dir, 'up'), 'up')
+  let state = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8'))
+  assert.equal(state.log[0].vote, 'up')
+  const html = lib.renderHtml(lib.computeView(state))
+  assert.match(html, /Good 100%/)
+  assert.match(html, /data-msg="vote-up" class="secondary on"/)
+  assert.equal(lib.voteLast(dir, 'up'), null, 'same vote again removes it')
+  assert.deepEqual(readdirSync(dir), ['state.json'], 'no lock or temp file left')
+  state = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8'))
+  assert.match(lib.computeView(state).tooltip, /Result quality: 50% \(fair\)/)
 })
