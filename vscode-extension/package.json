@@ -2,7 +2,7 @@
   "name": "copilot-effort-guard-status",
   "displayName": "Copilot Effort Guard",
   "description": "Colour bar and side panel showing how hard the GitHub Copilot model is struggling, with advice: raise thinking, upgrade the model, or downgrade when the task is easy.",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "publisher": "stefanochieli",
   "icon": "media/icon.png",
   "galleryBanner": {
