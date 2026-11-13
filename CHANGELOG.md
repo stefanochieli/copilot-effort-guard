@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.11.0...v0.11.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* tell VS Code chat sessions from Copilot CLI sessions ([#58](https://github.com/stefanochieli/copilot-effort-guard/issues/58)) ([d1810a6](https://github.com/stefanochieli/copilot-effort-guard/commit/d1810a6d3b80a287a85b2d6861b363b80e375cc7))
+
 ## [0.11.0](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.10.0...v0.11.0) (2026-11-12)
 
 
