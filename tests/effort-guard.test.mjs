@@ -163,13 +163,30 @@ test('event lines parse and folder names are extracted on Windows and POSIX path
   assert.equal(baseName('/a/b/proj/'), 'proj')
 })
 
-import { readSession } from '../src/effort-guard.mjs'
+import { readSession, hostEnv } from '../src/effort-guard.mjs'
 
 test('readSession tells VS Code chat from the CLI and falls back to the terminal tab id', () => {
   assert.deepEqual(readSession({ session_id: 'abc-12345678', hook_event_name: 'PostToolUse' }, {}), { id: '12345678', source: 'vscode-chat' })
   assert.deepEqual(readSession({}, { WT_SESSION: 'aaaa-bbbb-cccc' }), { id: 't-bbbbcccc', source: 'cli' })
   assert.equal(readSession({}, { TERM_PROGRAM: 'vscode' }).source, 'cli@vscode')
   assert.deepEqual(readSession({}, {}), { id: '-', source: 'cli' })
+  // VS Code chat reading the CLI-format hook file: camelCase id, but the event name or snake_case tool fields.
+  assert.equal(readSession({ sessionId: 'x-87654321', hookEventName: 'PostToolUse' }, {}).source, 'vscode-chat')
+  assert.equal(readSession({ sessionId: 'x', tool_name: 'run_in_terminal', tool_input: {} }, {}).source, 'vscode-chat')
+  assert.equal(readSession({ sessionId: 'x', transcript_path: '/t.json', prompt: 'hi' }, {}).source, 'vscode-chat')
+  // Spawned by the VS Code extension host, whatever the payload looks like.
+  assert.equal(readSession({ sessionId: 'x', prompt: 'hi' }, { VSCODE_CRASH_REPORTER_PROCESS_TYPE: 'extensionHost' }).source, 'vscode-chat')
+  assert.equal(readSession({ sessionId: 'x', prompt: 'hi' }, { ELECTRON_RUN_AS_NODE: '1' }).source, 'vscode-chat')
+  // The CLI in a VS Code terminal stays CLI: documented CLI payloads have none of the chat fields.
+  for (const f of ['docs-cli-userPromptSubmitted', 'docs-cli-postToolUse-success', 'docs-cli-postToolUseFailure']) {
+    const p = JSON.parse(readFileSync(new URL(`./fixtures/${f}.json`, import.meta.url), 'utf8'))
+    assert.equal(readSession(p, { TERM_PROGRAM: 'vscode' }).source, 'cli@vscode', f)
+    assert.equal(readSession(p, { WT_SESSION: 'w', ELECTRON_RUN_AS_NODE: '1' }).source, 'cli', f)
+  }
+  for (const f of ['docs-vscode-UserPromptSubmit', 'docs-vscode-PostToolUse']) {
+    const p = JSON.parse(readFileSync(new URL(`./fixtures/${f}.json`, import.meta.url), 'utf8'))
+    assert.equal(readSession(p, { TERM_PROGRAM: 'vscode' }).source, 'vscode-chat', f)
+  }
 })
 
 test('doctor report lists the sessions seen in the log, old log lines still parse', () => {
@@ -407,6 +424,9 @@ test('summarisePayloads reports shapes, not values', () => {
   assert.equal(g.count, 2)
   assert.match(g.argKeys, /command/)
   assert.equal(JSON.stringify(g).includes('secret'), false)
+  const [h] = summarisePayloads([JSON.stringify({ event: 'prompt', source: 'vscode-chat', hostEnv: ['ELECTRON_RUN_AS_NODE'], payload: { sessionId: 'x' } })])
+  assert.equal(h.source, 'vscode-chat')
+  assert.equal(h.hostEnv, 'ELECTRON_RUN_AS_NODE')
 })
 
 import { projectConfig, thresholds } from '../src/effort-guard.mjs'
@@ -455,4 +475,8 @@ test('quality signals: last test outcome, re-edited files, rework on the closed 
   assert.equal(s.log.at(-1).rework, true)
   assert.equal(JSON.stringify(s).includes('a.js'), false, 'paths are not stored')
   assert.match(summary(s), /Result quality \d+%/)
+})
+
+test('hostEnv lists only variable names, never values', () => {
+  assert.deepEqual(hostEnv({ ELECTRON_RUN_AS_NODE: '1', TERM_PROGRAM: 'vscode', SECRET: 'x', VSCODE_PID: '' }), ['ELECTRON_RUN_AS_NODE', 'TERM_PROGRAM'])
 })
