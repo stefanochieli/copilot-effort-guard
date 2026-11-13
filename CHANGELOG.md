@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.12.0...v0.12.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* stop counting pauses, benign tool errors and green-test turns as struggle ([#64](https://github.com/stefanochieli/copilot-effort-guard/issues/64)) ([d8c816e](https://github.com/stefanochieli/copilot-effort-guard/commit/d8c816e9196dddef2f34960e78349f705e09725a))
+
 ## [0.12.0](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.11.1...v0.12.0) (2026-11-13)
 
 
