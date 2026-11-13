@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.11.1...v0.12.0) (2026-11-13)
+
+
+### Features
+
+* track Copilot Chat and Copilot CLI side by side in the same folder ([#61](https://github.com/stefanochieli/copilot-effort-guard/issues/61)) ([92a580d](https://github.com/stefanochieli/copilot-effort-guard/commit/92a580de9483bb649258c547ca7a1382ecd52d60))
+
 ## [0.11.1](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.11.0...v0.11.1) (2026-11-13)
 
 
