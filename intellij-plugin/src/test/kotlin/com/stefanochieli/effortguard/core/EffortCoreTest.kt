@@ -217,4 +217,20 @@ class EffortCoreTest {
         assertNull(EffortCore.voteLast(dir, "up"))
         assertEquals(listOf("state.json"), Files.list(dir).use { s -> s.map { it.fileName.toString() }.toList() })
     }
+
+    @Test
+    fun lanesAreReadAndResetTogether() {
+        val raw = Json.parseObject(
+            """{"streak":0,"turn":{},"log":[],"threshold":3,"lanes":{"chat":{"streak":2,"turn":{"struggled":true,"reason":"tool_error"},"last":"2026-11-13T10:00:00Z"},"cli":{"streak":0,"calm":4,"turn":{},"last":"2026-11-13T10:05:00Z"}}}""",
+        )
+        val state = EffortCore.toState(raw)
+        assertEquals(listOf("Chat", "CLI"), state.lanes.map { it.label })
+        assertEquals(2, state.streak)
+        assertEquals("Chat", state.lane)
+        assertTrue(state.struggling)
+        val reset = EffortCore.toState(EffortCore.resetRaw(raw))
+        assertEquals(listOf(0, 0), reset.lanes.map { it.streak })
+        assertFalse(reset.struggling)
+        assertEquals(0, reset.lanes.single { it.kind == "cli" }.calm)
+    }
 }

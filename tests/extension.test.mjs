@@ -247,3 +247,32 @@ test('quality in the panel and votes on the last turn', () => {
   state = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8'))
   assert.match(lib.computeView(state).tooltip, /Result quality: 50% \(fair\)/)
 })
+
+test('Chat and CLI lanes are shown side by side; the main view follows the lane that struggles', () => {
+  const state = {
+    threshold: 3, calmThreshold: 8, streak: 0, calm: 1, turn: { struggled: false }, log: [],
+    lane: 'cli',
+    lanes: {
+      chat: { streak: 3, calm: 0, turn: { struggled: true, reason: 'tool_error' }, last: '2026-11-13T10:00:00.000Z' },
+      cli: { streak: 0, calm: 1, turn: { struggled: false }, last: '2026-11-13T10:05:00.000Z' },
+    },
+  }
+  const view = lib.computeView(state)
+  assert.equal(view.level, 'warn')
+  assert.equal(view.streak, 3)
+  assert.equal(view.kind, 'Chat')
+  assert.deepEqual(view.lanes.map(l => `${l.label}:${l.streak}:${l.level}`), ['Chat:3:warn', 'CLI:0:ok'])
+  assert.match(view.tooltip, /Chat: 3\/3 in a row, current turn struggling/)
+  const html = lib.renderHtml(view, Date.parse('2026-11-13T10:06:00.000Z'))
+  assert.match(html, /Chat and CLI/)
+  assert.match(html, /last hook 1 min ago/)
+})
+
+test('reset from the extension clears both lanes', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'eg-ext-lanes-'))
+  writeFileSync(join(dir, 'state.json'), JSON.stringify({ turn: { struggled: true }, streak: 2, log: [], lanes: { chat: { streak: 2, turn: { struggled: true } }, cli: { streak: 1 } } }))
+  const next = lib.resetProject(dir)
+  assert.equal(next.lanes.chat.streak, 0)
+  assert.equal(next.lanes.cli.streak, 0)
+  assert.equal(next.lanes.chat.turn.struggled, false)
+})

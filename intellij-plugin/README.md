@@ -7,7 +7,7 @@ Mostra quanto sta faticando il modello di GitHub Copilot, con consigli su cosa f
 ## Cosa mostra
 
 - **Status bar**: `🟢 ▰▱▱ 1/3`, una barra a segmenti (turni faticosi di fila su una soglia di 3) con un pallino colorato: ⚪ nessun dato, 🟢 ok, 🔵 molti turni puliti, 🟡 qualche fatica, 🔴 soglia raggiunta. Un clic apre la tool window. Il tooltip riassume i numeri.
-- **Tool window "Effort Guard"** (a destra): barra grande colorata, avanzamento verso la serie di turni puliti, cronologia degli ultimi turni (verde pulito, rosso faticoso), consiglio con etichetta (*↑ Raise thinking*, *↑↑ Upgrade model*, *↓ Downgrade*), sessioni recenti della cartella (CLI o Chat), cartella e ultima attività.
+- **Tool window "Effort Guard"** (a destra): barra grande colorata, avanzamento verso la serie di turni puliti, cronologia degli ultimi turni (verde pulito, rosso faticoso), consiglio con etichetta (*↑ Raise thinking*, *↑↑ Upgrade model*, *↓ Downgrade*), corsie *Chat* e *CLI* affiancate (ognuna con la sua serie e l'ultimo hook ricevuto; la vista principale segue quella che fatica di più), sessioni recenti della cartella, cartella e ultima attività.
 - **Notifiche** (balloon *Effort Guard*) quando la serie raggiunge la soglia, il doppio della soglia, o quando il task sembra facile.
 - **Reset**: pulsante nella tool window e voce *Tools | Effort Guard: Reset After Changing Model or Thinking*. Da usare dopo aver cambiato modello o thinking: le serie ripartono da zero (la cronologia resta).
 

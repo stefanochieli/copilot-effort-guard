@@ -84,6 +84,9 @@ function resetProject(dir, now = new Date()) {
     started: true,
     resetAt: now.toISOString(),
   }
+  if (state.lanes && typeof state.lanes === 'object') {
+    next.lanes = Object.fromEntries(Object.entries(state.lanes).map(([k, v]) => [k, { ...v, turn: { struggled: false, reason: null, command: null }, streak: 0, calm: 0, pendingWarning: null, started: true }]))
+  }
   // Temporary file + rename: the hooks never read a half-written state.
   withStateLock(file, () => writeStateAtomic(file, next))
   return next
@@ -304,8 +307,32 @@ function textBar(streak, threshold) {
   return '\u25B0'.repeat(filled) + '\u25B1'.repeat(segments - filled)
 }
 
+// Chat (VS Code agent) and CLI keep separate lanes in the same state file: each has
+// its own open turn, streak and clean run. The main view follows the lane that needs
+// attention most (then the most recent one); both are listed side by side.
+const LANE_LABEL = { chat: 'Chat', cli: 'CLI' }
+const LEVEL_RANK = { warn: 3, watch: 2, calm: 1, ok: 1, idle: 0 }
+
+function laneList(state, fallbackThreshold = 3) {
+  if (!state?.lanes || typeof state.lanes !== 'object') return []
+  return ['chat', 'cli']
+    .filter(k => state.lanes[k] && typeof state.lanes[k] === 'object')
+    .map(k => {
+      const lane = state.lanes[k]
+      const merged = { ...lane, threshold: state.threshold, calmThreshold: state.calmThreshold }
+      return { kind: k, label: LANE_LABEL[k], streak: lane.streak || 0, calm: lane.calm || 0, struggling: Boolean(lane.turn?.struggled), reason: lane.turn?.reason ?? null, last: lane.last ?? null, level: levelOf(merged, fallbackThreshold), state: merged }
+    })
+}
+
+function primaryLane(lanes) {
+  return [...lanes].sort((a, b) => LEVEL_RANK[b.level] - LEVEL_RANK[a.level] || String(b.last ?? '').localeCompare(String(a.last ?? '')))[0] ?? null
+}
+
 // level: idle (no data), ok, calm (long clean run: task may be easy), watch (some struggle), warn (threshold reached).
-function computeView(state, fallbackThreshold = 3) {
+function computeView(stateIn, fallbackThreshold = 3) {
+  const lanes = laneList(stateIn, fallbackThreshold)
+  const primary = primaryLane(lanes)
+  const state = primary ? { ...stateIn, turn: primary.state.turn, streak: primary.streak, calm: primary.calm } : stateIn
   if (!state) {
     return { level: 'idle', label: LEVEL_LABEL.idle, text: '$(pulse) effort -', tooltip: 'Effort Guard: no data for this folder yet. Use Copilot agent mode or the CLI here.', segments: fallbackThreshold, filled: 0, streak: 0, threshold: fallbackThreshold, calm: 0, calmThreshold: 8, timeline: [], hint: null }
   }
@@ -326,7 +353,8 @@ function computeView(state, fallbackThreshold = 3) {
   const messages = adviceMessages(streak, threshold, calm)
   // action: what to do with the model settings right now.
   const action = level === 'warn' ? (streak >= threshold * 2 ? 'model-up' : 'thinking-up') : level === 'calm' ? 'down' : null
-  const kind = sessionKind(state.session?.source)
+  const kind = primary ? primary.label : sessionKind(state.session?.source)
+  for (const l of lanes) lines.push(`${l.label}: ${l.streak}/${threshold} in a row${l.struggling ? ', current turn struggling' : ''}`)
   const tag = kind ? ` (${kind} session)` : ''
   const base = action === 'model-up' ? messages.escalate : action === 'thinking-up' ? messages.warn : action === 'down' ? messages.calm : null
   const hint = base ? base + tag : null
@@ -353,6 +381,7 @@ function computeView(state, fallbackThreshold = 3) {
     session: state.session ?? null,
     kind,
     sessions: (state.sessions ?? []).map(x => ({ kind: sessionKind(x.source), source: x.source, id: x.id, last: x.last })),
+    lanes: lanes.map(({ state: _s, ...l }) => l),
     resetAt: state.resetAt ?? null,
     cwd: state.cwd ?? null,
     updated: state.updated ?? null,
@@ -445,6 +474,11 @@ function renderHtml(view, now = Date.now()) {
   const sessions = (view.sessions ?? [])
     .map((x, i) => `<li>${i === 0 ? '<b>' : ''}${esc(x.kind ?? x.source)} / ${esc(x.id)}${i === 0 ? '</b> (latest)' : ''} <span class="muted">${esc(ageText(x.last, now))}</span></li>`)
     .join('')
+  const lanes = (view.lanes ?? []).length
+    ? `<h4>Chat and CLI</h4><div class="lanes">${view.lanes
+        .map(l => `<div class="lane" style="--l:${LEVEL_HEX[l.level]}"><b>${esc(l.label)}</b> <span class="muted">${esc(LEVEL_LABEL[l.level])}</span><div class="mini">${Array.from({ length: view.segments }, (_, i) => `<span class="${i < Math.min(l.streak, view.segments) ? 'on' : ''}"></span>`).join('')}</div><span class="muted">${l.streak}/${view.threshold} in a row${l.struggling ? ' \u00b7 turn struggling' : ''}<br>last hook ${esc(ageText(l.last, now))}</span></div>`)
+        .join('')}</div>`
+    : ''
   return `<!doctype html>
 <html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${NONCE}';">
@@ -478,16 +512,23 @@ function renderHtml(view, now = Date.now()) {
   .row button { margin-top: 6px; }
   button.secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
   button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
+  .lanes { display: flex; gap: 6px; }
+  .lane { flex: 1; padding: 6px; border-radius: 4px; border: 1px solid var(--vscode-widget-border, #8884); border-top: 3px solid var(--l); line-height: 1.4; }
+  .lane b { color: var(--l); }
+  .mini { display: flex; gap: 2px; margin: 4px 0; }
+  .mini span { flex: 1; height: 6px; border-radius: 2px; background: var(--vscode-input-background, #3338); }
+  .mini span.on { background: var(--l); }
 </style></head><body>
 <div class="level"><b>${esc(view.label)}</b>${badge}<span class="count">${view.streak}/${view.threshold} struggling turns in a row</span></div>
 <div class="bar">${segs}</div>
 <h4>Clean run (${view.calm}/${view.calmThreshold})</h4>
 <div class="calm"><i></i></div>
+${lanes}
 ${qualityHtml(view)}
 <h4>Last turns</h4>
 <div class="timeline">${dots}</div>
 ${view.hint ? `<div class="hint">${esc(view.hint)}</div>` : ''}
-${sessions ? `<h4>Sessions in this folder</h4><ul>${sessions}</ul><div class="muted">Streaks are counted per folder, shared by these sessions.</div>` : ''}
+${sessions ? `<h4>Sessions in this folder</h4><ul>${sessions}</ul><div class="muted">Chat and CLI have separate streaks in each folder; CLI sessions share theirs.</div>` : ''}
 ${view.history?.some(d => d.turns) ? `<h4>Last ${view.history.length} days</h4>${historySvg(view.history)}<div class="muted">${esc(view.history[0].day)} \u2192 ${esc(view.history.at(-1).day)} \u00b7 red: struggling turns</div>` : ''}
 ${view.reasons?.length ? `<h4>Why it struggled</h4><ul>${view.reasons.map(r => `<li>${esc(r.reason)}: ${r.count}</li>`).join('')}</ul>` : ''}
 ${view.hooks && !view.hooks.installed ? `<div class="hint">The Copilot hooks are not installed, so there is nothing to show yet.<button data-msg="install">Install hooks</button></div>` : ''}
