@@ -395,7 +395,7 @@ test('doctor flags the hooks registered both as user file and in the repository'
 import { summarisePayloads } from '../src/effort-guard.mjs'
 
 test('a shell command with a non-zero exit code is a struggle, except grep-like commands', () => {
-  const ls = { toolName: 'powershell', toolArgs: { command: 'ls C:\\nope' }, toolResult: { resultType: 'success', textResultForLlm: 'not found\n<exited with exit code 2>' } }
+  const ls = { toolName: 'powershell', toolArgs: { command: 'node build.js C:\\nope' }, toolResult: { resultType: 'success', textResultForLlm: 'not found\n<exited with exit code 2>' } }
   assert.equal(onTool(emptyState(), ls).turn.reason, 'exit_code')
   const grep = { toolName: 'bash', toolArgs: { command: 'grep x f' }, toolResult: { textResultForLlm: '<exited with exit code 1>' } }
   assert.equal(onTool(emptyState(), grep).turn.struggled, false)
@@ -437,9 +437,13 @@ test('per-project thresholds come from .effort-guard.json in the folder or a par
   writeFileSync(join(root, '.effort-guard.json'), JSON.stringify({ threshold: 5, calmThreshold: 12 }))
   const cfg = projectConfig(join(root, 'a', 'b'))
   assert.equal(cfg.threshold, 5)
-  assert.deepEqual(thresholds({}, cfg), { threshold: 5, calmThreshold: 12 })
-  assert.deepEqual(thresholds({ EFFORT_GUARD_THRESHOLD: '2' }, cfg), { threshold: 2, calmThreshold: 12 })
-  assert.deepEqual(thresholds({}, { threshold: 'x', calmThreshold: 1 }), { threshold: 3, calmThreshold: 8 })
+  const rest = { gapMinutes: 30, resetOnSession: false }
+  assert.deepEqual(thresholds({}, cfg), { threshold: 5, calmThreshold: 12, ...rest })
+  assert.deepEqual(thresholds({ EFFORT_GUARD_THRESHOLD: '2' }, cfg), { threshold: 2, calmThreshold: 12, ...rest })
+  assert.deepEqual(thresholds({}, { threshold: 'x', calmThreshold: 1 }), { threshold: 3, calmThreshold: 8, ...rest })
+  assert.deepEqual(thresholds({}, { gapMinutes: 45, resetOnSessionChange: true }), { threshold: 3, calmThreshold: 8, gapMinutes: 45, resetOnSession: true })
+  assert.equal(thresholds({ EFFORT_GUARD_GAP_MINUTES: '0', EFFORT_GUARD_RESET_ON_SESSION: '0' }, { gapMinutes: 45, resetOnSessionChange: true }).gapMinutes, 0)
+  assert.equal(thresholds({ EFFORT_GUARD_RESET_ON_SESSION: '0' }, { resetOnSessionChange: true }).resetOnSession, false)
   writeFileSync(join(root, '.effort-guard.json'), '{broken')
   assert.deepEqual(projectConfig(root), {})
 })
@@ -533,4 +537,107 @@ test('a new lane does not log an empty turn on its first prompt; rework marks th
   const chatEntries = r.state.log.filter(e => e.kind === 'chat')
   assert.equal(chatEntries.at(-1).rework, true)
   assert.equal(r.state.log.find(e => e.ts === 'b').rework, undefined)
+})
+
+import { newEpisode, agentOf, run as runHook } from '../src/effort-guard.mjs'
+import { errorRules, isBenignError, isMissingCommand, isProbe, BENIGN_ERRORS } from '../src/benign.mjs'
+
+const failTool = (text, command = 'node app.js', exitCode = undefined) => ({ toolName: 'powershell', toolArgs: { command }, toolResult: { resultType: 'failure', textResultForLlm: text, ...(exitCode !== undefined ? { exitCode } : {}) } })
+const viewFail = text => ({ toolName: 'view', toolArgs: { path: 'a.java' }, toolResult: { resultType: 'failure', textResultForLlm: text } })
+
+test('a pause longer than gapMinutes starts a new episode: the streak restarts from zero', () => {
+  const view = { ...emptyState(), streak: 2, calm: 0, pendingWarning: 'w', log: [{ ts: 'x', struggled: true, streak: 2 }] }
+  const now = new Date('2026-11-13T09:12:00Z')
+  const after = newEpisode(view, { last: '2026-11-12T09:57:00Z', now, gapMinutes: 30 })
+  assert.equal(after.streak, 0)
+  assert.equal(after.pendingWarning, null)
+  assert.equal(after.episode, 'gap')
+  assert.equal(newEpisode(view, { last: '2026-11-13T08:50:00Z', now, gapMinutes: 30 }).streak, 2)
+  assert.equal(newEpisode(view, { last: '2026-11-12T09:57:00Z', now, gapMinutes: 0 }).streak, 2, '0 turns it off')
+  assert.equal(newEpisode(view, { last: undefined, now }).streak, 2)
+  // The turn closed after the pause is the first of the new episode.
+  const closed = runHook('prompt', { prompt: 'next' }, { ...after, turn: { struggled: true, reason: 'tool_error', command: 'x' } }, 3, now, 8, 'cli')
+  assert.equal(closed.state.log.at(-1).streak, 1)
+  assert.equal(closed.state.log.at(-1).episode, 'gap')
+  assert.equal(closed.stderr, null)
+})
+
+test('a session change resets the streak only when resetOnSessionChange is on', () => {
+  const view = { ...emptyState(), streak: 2, sessionId: 'aaa', log: [] }
+  const now = new Date()
+  assert.equal(newEpisode(view, { last: now.toISOString(), now, sessionId: 'bbb' }).streak, 2)
+  const reset = newEpisode(view, { last: now.toISOString(), now, sessionId: 'bbb', resetOnSession: true })
+  assert.equal(reset.streak, 0)
+  assert.equal(reset.episode, 'session')
+  assert.equal(reset.sessionId, 'bbb')
+  assert.equal(newEpisode(view, { last: now.toISOString(), now, sessionId: '-', resetOnSession: true }).streak, 2, 'no id, no reset')
+  assert.equal(newEpisode({ ...view, sessionId: undefined }, { now, sessionId: 'bbb', resetOnSession: true }).streak, 2, 'first session seen')
+})
+
+test('a turn whose last test/build run is green is not a struggle, whatever failed before', () => {
+  let s = onTool(emptyState(), failTool('boom'))
+  assert.equal(s.turn.struggled, true)
+  s = onTool(s, { toolName: 'powershell', toolArgs: { command: 'mvn test' }, toolResult: { exitCode: 0, textResultForLlm: 'BUILD SUCCESS' } })
+  assert.equal(s.turn.tests, 'green')
+  const closed = closeTurn({ ...s, streak: 2, started: true, log: [{}] }, 3)
+  assert.equal(closed.state.streak, 0)
+  assert.equal(closed.state.log.at(-1).struggled, false)
+  assert.equal(closed.state.log.at(-1).reason, null)
+  assert.equal(closed.state.log.at(-1).cleared, 'tool_error')
+  assert.equal(closed.warning, null)
+  // A red last run still counts.
+  const red = onTool(emptyState(), { toolName: 'bash', toolArgs: { command: 'mvn test' }, toolResult: { exitCode: 1, textResultForLlm: 'Tests run: 3, Failures: 1' } })
+  assert.equal(closeTurn({ ...red, started: true, log: [{}] }, 3).state.streak, 1)
+})
+
+test('benign tool errors are not counted; real build and test failures still are', () => {
+  for (const text of ['view_range out of bounds: file has 40 lines', 'File too large, not read', 'Permission to run this tool was denied.', 'Command refused by --deny-tool rule shell(git config)']) {
+    const tool = text.startsWith('view') || text.startsWith('File') ? viewFail(text) : failTool(text, 'git config user.name x')
+    assert.equal(onTool(emptyState(), tool).turn.struggled, false, text)
+  }
+  assert.equal(onTool(emptyState(), viewFail('ENOENT: no such file')).turn.struggled, true)
+  // Repository list (.effort-guard.json "benignErrors").
+  const rules = errorRules({ benignErrors: ['PLAN_MISMATCH', 42, ' '] })
+  const plan = { toolName: 'powershell', toolArgs: { command: 'node validation-status.mjs read' }, toolResult: { textResultForLlm: 'PLAN_MISMATCH: step 3\n<exited with exit code 3>' } }
+  assert.equal(onTool(emptyState(), plan).turn.reason, 'exit_code')
+  assert.equal(onTool(emptyState(), plan, { rules }).turn.struggled, false)
+  assert.equal(rules.benign.length, BENIGN_ERRORS.length + 1)
+  // A test command that fails is never benign, even with a benign word in its output.
+  const mvn = { toolName: 'bash', toolArgs: { command: 'mvn test' }, toolResult: { exitCode: 1, textResultForLlm: 'BUILD FAILURE PLAN_MISMATCH' } }
+  assert.equal(onTool(emptyState(), mvn, { rules }).turn.struggled, true)
+  assert.equal(isBenignError(''), false)
+})
+
+test('a missing command is forgiven once per turn, the second one counts', () => {
+  const py = { toolName: 'powershell', toolArgs: { command: 'python x.py' }, toolResult: { textResultForLlm: 'Python non è stato trovato; eseguire senza argomenti\n<exited with exit code 9009>' } }
+  let s = onTool(emptyState(), py)
+  assert.equal(s.turn.struggled, false)
+  assert.equal(s.turn.missing, true)
+  s = onTool(s, py)
+  assert.equal(s.turn.struggled, true)
+  assert.equal(isMissingCommand('', 9009), true)
+  assert.equal(isMissingCommand('bash: foo: command not found', 127), true)
+  assert.equal(isMissingCommand('error', 1), false)
+})
+
+test('probe commands (does it exist?) do not count their exit code; the list is extendable', () => {
+  const probe = command => ({ toolName: 'powershell', toolArgs: { command }, toolResult: { textResultForLlm: 'not there\n<exited with exit code 1>' } })
+  assert.equal(onTool(emptyState(), probe('Get-ChildItem C:\\x -Recurse')).turn.struggled, false)
+  assert.equal(onTool(emptyState(), probe('Test-Path foo')).turn.struggled, false)
+  assert.equal(onTool(emptyState(), probe('javap -cp x A')).turn.struggled, true)
+  assert.equal(onTool(emptyState(), probe('javap -cp x A'), { rules: errorRules({ probeCommands: ['javap'] }) }).turn.struggled, false)
+  assert.equal(isProbe('./ls -la'), true)
+  assert.equal(isProbe(''), false)
+})
+
+test('log entries carry the session and, when the host sends one, the agent', () => {
+  assert.equal(agentOf({ agent: 'reviewer' }), 'reviewer')
+  assert.equal(agentOf({ agent: { name: 'planner' } }), 'planner')
+  assert.equal(agentOf({ subagent_type: 'implementation<x>' }), 'implementationx')
+  assert.equal(agentOf({}), null)
+  const s = { ...emptyState(), started: true, log: [{}], turn: { struggled: true, reason: 'tool_error', command: 'x' } }
+  const out = runHook('prompt', { prompt: 'go', agentName: 'validator' }, s, 3, new Date(), 8, 'cli', { session: { id: 'abc', source: 'cli' } })
+  assert.deepEqual([out.state.log.at(-1).kind, out.state.log.at(-1).session, out.state.log.at(-1).agent], ['cli', 'abc', 'validator'])
+  const anon = runHook('prompt', { prompt: 'go' }, s, 3, new Date(), 8, 'cli', { session: { id: '-', source: 'cli' } })
+  assert.equal('session' in anon.state.log.at(-1), false)
 })

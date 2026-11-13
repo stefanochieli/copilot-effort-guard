@@ -29,7 +29,7 @@ const hooksDir = user ? join(base, 'hooks') : join(base, '.github', 'hooks')
 const entry = user ? join(codeDir, 'effort-guard.mjs') : '.effort-guard-hooks/effort-guard.mjs'
 const cmd = event => `node "${entry}" ${event}`
 
-const SRC_FILES = ['effort-guard.mjs', 'detect.mjs', 'report.mjs', 'redact.mjs', 'quality.mjs']
+const SRC_FILES = ['effort-guard.mjs', 'detect.mjs', 'report.mjs', 'redact.mjs', 'quality.mjs', 'benign.mjs']
 const CODE_FILES = [...SRC_FILES, 'package.json']
 
 if (uninstall) {

@@ -270,11 +270,12 @@ function csvCell(v) {
 
 // One row per logged turn of every project: no commands, no tool output.
 function toCsv(projects) {
-  const rows = [['project', 'timestamp', 'struggled', 'reason', 'streak', 'tests', 'rework', 'reedits', 'vote', 'quality']]
+  // New columns go at the end: older rows simply leave them empty.
+  const rows = [['project', 'timestamp', 'struggled', 'reason', 'streak', 'tests', 'rework', 'reedits', 'vote', 'quality', 'kind', 'session', 'agent', 'episode', 'cleared']]
   for (const p of projects) {
     for (const e of p.state.log ?? []) {
       const q = qualityOf(e)
-      rows.push([p.state.cwd ?? p.dir, e.ts ?? '', e.struggled ? 'true' : 'false', e.reason ?? '', e.streak ?? '', e.tests ?? '', e.rework ? 'true' : '', e.reedits ?? '', e.vote ?? '', q === null ? '' : q])
+      rows.push([p.state.cwd ?? p.dir, e.ts ?? '', e.struggled ? 'true' : 'false', e.reason ?? '', e.streak ?? '', e.tests ?? '', e.rework ? 'true' : '', e.reedits ?? '', e.vote ?? '', q === null ? '' : q, LANE_LABEL[e.kind] ?? '', e.session ?? '', e.agent ?? '', e.episode ?? '', e.cleared === true ? 'true' : e.cleared ?? ''])
     }
   }
   return rows.map(r => r.map(csvCell).join(',')).join('\n') + '\n'
