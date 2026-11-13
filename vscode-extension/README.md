@@ -45,7 +45,7 @@ Sezione *Result quality* del pannello: punteggio degli ultimi turni calcolato da
 
 ## Storico
 
-Il pannello mostra i turni degli ultimi 14 giorni (in rosso quelli faticosi) e i motivi più frequenti. *Effort Guard: Export history as CSV* esporta tutti i turni registrati di tutti i progetti (data, esito, motivo; nessun comando né output).
+Il pannello mostra i turni degli ultimi 14 giorni (in rosso quelli faticosi) e i motivi più frequenti. *Effort Guard: Export history as CSV* esporta tutti i turni registrati di tutti i progetti (data, esito, motivo; nessun comando né output). In coda alle colonne storiche ci sono `kind` (Chat/CLI), `session`, `agent` (solo se Copilot passa il nome dell'agente all'hook), `episode` (`gap` quando la serie è ripartita dopo una pausa) e `cleared` (motivo annullato da test verdi); i turni registrati prima di queste colonne le lasciano vuote.
 
 ## Sessioni: chat e CLI
 

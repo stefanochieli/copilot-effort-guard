@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { looksLikeTestFailure, isTestCommand, isTestSuccess, exitCodeOf, ignoresExitCode } from './detect.mjs'
+import { errorRules, isBenignError, isMissingCommand, isProbe } from './benign.mjs'
 import { formatDoctor, renderBar } from './report.mjs'
 import { redact, clip } from './redact.mjs'
 import { isEditTool, editedFiles, looksLikeRework, qualitySummary } from './quality.mjs'
@@ -170,7 +171,21 @@ export function touchSession(sessions, session, now = new Date(), limit = 5) {
 // says which lane wrote it) and the top-level fields mirror the lane that acted
 // last, so older extensions keep working.
 export const LANES = ['chat', 'cli']
-const LANE_KEYS = ['turn', 'streak', 'calm', 'pendingWarning', 'lastPromptKey', 'recentFiles', 'started']
+const LANE_KEYS = ['turn', 'streak', 'calm', 'pendingWarning', 'lastPromptKey', 'recentFiles', 'started', 'sessionId']
+
+// A new episode starts after a pause (no hook of this lane for gapMinutes) or, when
+// asked for, when another session takes over the lane: the streak starts from zero,
+// so two struggles hours apart are not counted as one. Turns, calm run and log stay.
+export const DEFAULT_GAP_MINUTES = 30
+
+export function newEpisode(view, { last, now = new Date(), gapMinutes = DEFAULT_GAP_MINUTES, sessionId = null, resetOnSession = false } = {}) {
+  const idle = last && gapMinutes > 0 ? now.getTime() - new Date(last).getTime() : 0
+  const byGap = Number.isFinite(idle) && idle > gapMinutes * 60_000
+  const bySession = resetOnSession && sessionId && sessionId !== '-' && view.sessionId && view.sessionId !== sessionId
+  const next = sessionId && sessionId !== '-' ? { ...view, sessionId } : view
+  if (!byGap && !bySession) return next
+  return { ...next, streak: 0, pendingWarning: null, episode: byGap ? 'gap' : 'session' }
+}
 
 export function laneOf(source) {
   return source === 'vscode-chat' ? 'chat' : 'cli'
@@ -198,7 +213,7 @@ export function mergeLane(state, lane, next, now = new Date()) {
 }
 
 // Pure state transitions: the CLI wrapper below only does I/O.
-export function onTool(state, payload, { failed: failedEvent = false } = {}) {
+export function onTool(state, payload, { failed: failedEvent = false, rules = errorRules() } = {}) {
   // errorOccurred also reports model, system and user-input errors: only a failed
   // tool execution says anything about the task being hard.
   const errorContext = pick(payload, 'errorContext', 'error_context')
@@ -223,12 +238,23 @@ export function onTool(state, payload, { failed: failedEvent = false } = {}) {
 
   const result = pick(payload, 'toolResult', 'tool_response', 'toolResponse', 'tool_result')
   const exitCode = isShell ? exitCodeOf(result && typeof result === 'object' ? result : {}, text) : null
-  const badExit = exitCode !== null && exitCode !== 0 && !ignoresExitCode(command)
-  const reason = failed ? 'tool_error' : looksLikeTestFailure(command, text) ? 'test_failure_pattern' : badExit ? 'exit_code' : null
+  const badExit = exitCode !== null && exitCode !== 0 && !ignoresExitCode(command) && !isProbe(command, rules)
+  let reason = failed ? 'tool_error' : looksLikeTestFailure(command, text) ? 'test_failure_pattern' : badExit ? 'exit_code' : null
+  // Errors that say nothing about the task (benign.mjs, extendable per repository).
+  // A real test/build failure is always counted.
+  let missing = false
+  if (reason && reason !== 'test_failure_pattern' && !isTestCommand(command)) {
+    if (isBenignError(text, rules)) {
+      reason = null
+    } else if (isMissingCommand(text, exitCode, rules)) {
+      missing = true
+      if (!state.turn.missing) reason = null // the first one in a turn is forgiven
+    }
+  }
   if (isShell && isTestCommand(command)) {
     quality.tests = isTestSuccess(command, text, exitCode) && !failed ? 'green' : 'red'
   }
-  const keep = { files: state.turn.files, tests: state.turn.tests, ...quality }
+  const keep = { files: state.turn.files, tests: state.turn.tests, ...(missing || state.turn.missing ? { missing: true } : {}), ...quality }
 
   if (!reason) {
     // Red then green in the same turn (TDD, or a fix that worked) is not a struggle.
@@ -236,7 +262,7 @@ export function onTool(state, payload, { failed: failedEvent = false } = {}) {
     if (state.turn.struggled && state.turn.test && isShell && process.env.EFFORT_GUARD_RED_GREEN !== '0' && isTestSuccess(command, text, exitCode)) {
       return { ...state, turn: { struggled: false, reason: null, command: null, ...keep } }
     }
-    return quality.tests || quality.files ? { ...state, turn: { ...state.turn, ...keep } } : state
+    return quality.tests || quality.files || (missing && !state.turn.missing) ? { ...state, turn: { ...state.turn, ...keep } } : state
   }
 
   // What is kept is a short, redacted copy: the full command line can hold a token.
@@ -265,7 +291,12 @@ export function closeTurn(state, threshold, now = new Date(), calmThreshold = DE
     return { state: { ...state, started: true }, warning: null, notice: null }
   }
 
-  const { struggled, reason, command } = state.turn
+  // A turn whose last test/build run is green ended well: whatever failed on the way
+  // (a missing file, a refused command) was not a struggle.
+  const green = state.turn.tests === 'green'
+  const struggled = Boolean(state.turn.struggled) && !green
+  const reason = struggled ? state.turn.reason : null
+  const command = struggled ? state.turn.command : null
   const streak = struggled ? state.streak + 1 : 0
   // Consecutive clean turns: a long calm run suggests the task is easy.
   const calm = struggled ? 0 : (state.calm ?? 0) + 1
@@ -274,6 +305,7 @@ export function closeTurn(state, threshold, now = new Date(), calmThreshold = DE
       ? `effort-guard: ${calm} clean turns in a row. The task looks easy: downgrade to a lighter model or lower the thinking effort to save tokens.`
       : null
   const entry = { ts: now.toISOString(), struggled, reason, streak }
+  if (green && state.turn.struggled) entry.cleared = state.turn.reason ?? true
   const { tests, files } = state.turn
   if (tests) entry.tests = tests
   const again = reedits(files, state.recentFiles)
@@ -354,6 +386,9 @@ export function thresholds(env = process.env, config = {}) {
   return {
     threshold: intIn(env.EFFORT_GUARD_THRESHOLD, 1, 100) ?? intIn(config.threshold, 1, 100) ?? DEFAULT_THRESHOLD,
     calmThreshold: intIn(env.EFFORT_GUARD_CALM, 2, 1000) ?? intIn(config.calmThreshold, 2, 1000) ?? DEFAULT_CALM,
+    // 0 turns the pause reset off.
+    gapMinutes: intIn(env.EFFORT_GUARD_GAP_MINUTES, 0, 10080) ?? intIn(config.gapMinutes, 0, 10080) ?? DEFAULT_GAP_MINUTES,
+    resetOnSession: (env.EFFORT_GUARD_RESET_ON_SESSION ?? '') !== '' ? env.EFFORT_GUARD_RESET_ON_SESSION === '1' : config.resetOnSessionChange === true,
   }
 }
 
@@ -551,13 +586,21 @@ export function warningOutput(warning, hookEventName) {
 
 // Identifies one prompt: the same prompt reaching two registered hooks has the same
 // session and timestamp. Without both there is no safe way to tell, so no key.
+// Name of the agent (custom agent, subagent) when the host sends one. Not confirmed
+// for Copilot yet: `effort-guard payloads` lists the keys that really arrive.
+export function agentOf(payload) {
+  const v = pick(payload, 'agent', 'agentName', 'agent_name', 'agentId', 'agent_id', 'subagent', 'subagentType', 'subagent_type', 'chatMode')
+  const name = typeof v === 'object' && v ? pick(v, 'name', 'id', 'slug') : v
+  return typeof name === 'string' && name.trim() ? name.trim().replace(/[^\w .:@/-]/g, '').slice(0, 40) : null
+}
+
 export function promptKey(payload) {
   const session = pick(payload, 'session_id', 'sessionId')
   const ts = pick(payload, 'timestamp')
   return session !== undefined && ts !== undefined ? `${session}|${ts}` : null
 }
 
-export function run(event, payload, state, threshold, now = new Date(), calmThreshold = DEFAULT_CALM, lane = null) {
+export function run(event, payload, state, threshold, now = new Date(), calmThreshold = DEFAULT_CALM, lane = null, { rules = errorRules(), session = null } = {}) {
   if (event === 'prompt') {
     // The same hook registered twice (user and repository files) delivers the same
     // prompt twice: closing the turn twice would see a clean turn and reset the streak.
@@ -567,9 +610,13 @@ export function run(event, payload, state, threshold, now = new Date(), calmThre
     }
     const closed = closeTurn(state, threshold, now, calmThreshold)
     let next = key ? { ...closed.state, lastPromptKey: key } : closed.state
-    if (lane && next.log.length > state.log.length) {
-      next = { ...next, log: [...next.log.slice(0, -1), { ...next.log.at(-1), kind: lane }] }
+    if (next.log.length > state.log.length) {
+      // Who ran the turn: the lane, the session and (when the host says) the agent.
+      const agent = agentOf(payload)
+      const tags = { ...(lane ? { kind: lane } : {}), ...(session?.id && session.id !== '-' ? { session: session.id } : {}), ...(agent ? { agent } : {}), ...(state.episode ? { episode: state.episode } : {}) }
+      if (Object.keys(tags).length) next = { ...next, log: [...next.log.slice(0, -1), { ...next.log.at(-1), ...tags }] }
     }
+    if (state.sessionId) next = { ...next, sessionId: state.sessionId }
     // A prompt asking to fix or redo marks the turn it reacts to: the last one closed
     // in the same lane (Chat and CLI turns interleave in the shared log).
     if (looksLikeRework(pick(payload, 'prompt', 'user_prompt', 'userPrompt'))) {
@@ -584,7 +631,7 @@ export function run(event, payload, state, threshold, now = new Date(), calmThre
   }
 
   if (event === 'tool' || event === 'failure') {
-    let next = onTool(state, payload, { failed: event === 'failure' })
+    let next = onTool(state, payload, { failed: event === 'failure', rules })
     // The prompt hook cannot inject context in every host, so the warning that
     // the prompt hook produced is handed over on the first tool event instead.
     if (next.pendingWarning) {
@@ -804,13 +851,19 @@ function main() {
   debugDump(event, payload, input)
 
   const path = statePath()
-  const { threshold, calmThreshold } = thresholds(process.env, projectConfig(activeCwd))
+  const config = projectConfig(activeCwd)
+  const { threshold, calmThreshold, gapMinutes, resetOnSession } = thresholds(process.env, config)
+  const rules = errorRules(config)
   withLock(path, () => {
     const before = load(path)
     const session = readSession(payload)
     const lane = laneOf(session.source)
     const now = new Date()
-    const result = run(event, payload, laneView(before, lane), threshold, now, calmThreshold, lane)
+    // The pause is measured on prompts only: a long build inside a turn is not a pause.
+    const view = laneView(before, lane)
+    const last = before.lanes ? before.lanes[lane]?.last : before.updated
+    const start = event === 'prompt' ? newEpisode(view, { last, now, gapMinutes, sessionId: session.id, resetOnSession }) : view
+    const result = run(event, payload, start, threshold, now, calmThreshold, lane, { rules, session })
     if (result.duplicate) {
       return
     }
