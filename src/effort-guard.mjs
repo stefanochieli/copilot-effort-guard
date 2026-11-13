@@ -57,15 +57,39 @@ export function readTool(payload) {
   }
 }
 
-// Which Copilot session called the hook. VS Code payloads carry session_id and
-// hook_event_name; Copilot CLI payloads may not, so fall back to the terminal id
-// the shell exports (Windows Terminal, VS Code terminals), which differs per tab.
-// Best effort: the label only helps the human reading doctor, it never drives logic.
+// Which Copilot session called the hook, and from where.
+// VS Code chat payloads carry the event name (hook_event_name or hookEventName),
+// snake_case tool fields (tool_name, tool_input, tool_response, tool_use_id) or
+// transcript_path, even when VS Code reads the CLI-format hook file. Copilot CLI
+// payloads carry none of those (sessionId, toolName, toolArgs, toolResult).
+// The process that runs the hook is a second signal: VS Code's extension host
+// exports ELECTRON_RUN_AS_NODE / VSCODE_CRASH_REPORTER_PROCESS_TYPE=extensionHost,
+// which a shell in a terminal tab does not have.
+// The terminal id (Windows Terminal, VS Code terminals) is the fallback id for a CLI
+// payload without a session id. Best effort: the label is shown to the human, it
+// never drives the struggle logic.
+const CHAT_KEYS = ['hook_event_name', 'hookEventName', 'session_id', 'transcript_path', 'tool_name', 'tool_input', 'tool_response', 'tool_use_id']
+// Variable names only: their values are never read or logged.
+export const HOST_ENV = ['ELECTRON_RUN_AS_NODE', 'VSCODE_CRASH_REPORTER_PROCESS_TYPE', 'VSCODE_PID', 'VSCODE_IPC_HOOK', 'TERM_PROGRAM', 'WT_SESSION', 'COPILOT_CLI', 'COPILOT_HOME']
+
+export function hostEnv(env = process.env) {
+  return HOST_ENV.filter(k => env[k] !== undefined && env[k] !== '')
+}
+
+export function sessionSource(payload, env = process.env) {
+  const chatPayload = CHAT_KEYS.some(k => pick(payload, k) !== undefined)
+  const inTerminal = Boolean(env.TERM_PROGRAM || env.WT_SESSION || env.TERM_SESSION_ID)
+  const extensionHost = env.VSCODE_CRASH_REPORTER_PROCESS_TYPE === 'extensionHost' || (Boolean(env.ELECTRON_RUN_AS_NODE) && !inTerminal)
+  if (chatPayload || extensionHost) {
+    return 'vscode-chat'
+  }
+  return env.TERM_PROGRAM === 'vscode' ? 'cli@vscode' : 'cli'
+}
+
 export function readSession(payload, env = process.env) {
   const id = pick(payload, 'session_id', 'sessionId', 'conversation_id', 'conversationId')
-  const vscodePayload = pick(payload, 'hook_event_name', 'session_id') !== undefined
   const terminal = env.WT_SESSION || env.TERM_SESSION_ID || env.VSCODE_GIT_IPC_HANDLE
-  const source = vscodePayload ? 'vscode-chat' : env.TERM_PROGRAM === 'vscode' ? 'cli@vscode' : 'cli'
+  const source = sessionSource(payload, env)
   const short = v => String(v).replace(/[^A-Za-z0-9]/g, '').slice(-8)
   if (id) return { id: short(id), source }
   if (terminal) return { id: `t-${short(terminal)}`, source }
@@ -468,7 +492,7 @@ function debugDump(event, payload, input = {}) {
   const path = join(dir, 'payloads.jsonl')
   // When stdin was not valid JSON the raw text is kept too, so the capture shows why.
   const extra = input.error ? { stdinError: input.error, stdinRaw: String(input.raw).slice(0, 4000) } : {}
-  let line = JSON.stringify({ ts: new Date().toISOString(), event, payload, ...extra })
+  let line = JSON.stringify({ ts: new Date().toISOString(), event, source: sessionSource(payload), hostEnv: hostEnv(), payload, ...extra })
   if (mode !== 'raw') {
     line = redact(line)
   }
@@ -582,7 +606,7 @@ export function summarisePayloads(lines) {
     const args = pick(p, 'toolArgs', 'tool_input', 'toolInput')
     const argKeys = args && typeof args === 'object' ? Object.keys(args).sort().join(', ') : typeof args === 'string' ? `(string) ${Object.keys(safeJson(args)).sort().join(', ')}` : ''
     const exitCode = tool ? exitCodeOf(result && typeof result === 'object' ? result : {}, text) : null
-    const g = { event: rec.event, keys, tool, argKeys, resultKeys, resultType: resultType ?? '', exitCode, parseError: rec.stdinError ?? '' }
+    const g = { event: rec.event, source: rec.source ?? '', hostEnv: (rec.hostEnv ?? []).join(', '), keys, tool, argKeys, resultKeys, resultType: resultType ?? '', exitCode, parseError: rec.stdinError ?? '' }
     const id = JSON.stringify(g)
     groups.set(id, { ...g, count: (groups.get(id)?.count ?? 0) + 1 })
   }
@@ -597,7 +621,7 @@ function payloads() {
     return console.log('effort-guard: no payloads.jsonl here. Start Copilot with EFFORT_GUARD_DEBUG=1 first.')
   }
   for (const g of summarisePayloads(lines)) {
-    console.log(`${g.count}x ${g.event}${g.tool ? ` tool=${g.tool}` : ''}\n   payload keys: ${g.keys}\n   tool args keys: ${g.argKeys || '-'}\n   result keys: ${g.resultKeys || '-'} resultType=${g.resultType || '-'} exitCode=${g.exitCode ?? '-'}${g.parseError ? `\n   STDIN ERROR: ${g.parseError}` : ''}`)
+    console.log(`${g.count}x ${g.event}${g.tool ? ` tool=${g.tool}` : ''} source=${g.source || '-'}\n   host env: ${g.hostEnv || '-'}\n   payload keys: ${g.keys}\n   tool args keys: ${g.argKeys || '-'}\n   result keys: ${g.resultKeys || '-'} resultType=${g.resultType || '-'} exitCode=${g.exitCode ?? '-'}${g.parseError ? `\n   STDIN ERROR: ${g.parseError}` : ''}`)
   }
 }
 
