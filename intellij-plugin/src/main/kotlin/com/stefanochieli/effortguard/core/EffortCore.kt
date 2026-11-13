@@ -42,6 +42,12 @@ fun sessionKind(source: String?): String? = when {
     else -> null
 }
 
+/**
+ * One lane of the folder state: Copilot Chat (VS Code agent) or Copilot CLI. Each lane has
+ * its own open turn, streak and clean run (see src/effort-guard.mjs).
+ */
+data class LaneInfo(val kind: String, val label: String, val streak: Int, val calm: Int, val struggling: Boolean, val reason: String?, val last: String?)
+
 /** One closed turn of the log: when, whether it struggled, and why. */
 data class LogEntry(
     val ts: String?,
@@ -72,6 +78,9 @@ data class EffortState(
     val session: SessionInfo?,
     val sessions: List<SessionInfo>,
     val entries: List<LogEntry> = emptyList(),
+    val lanes: List<LaneInfo> = emptyList(),
+    /** Label of the lane the main view follows (the one that needs attention most), if any. */
+    val lane: String? = null,
 )
 
 data class Messages(val warn: String, val escalate: String, val calm: String)
@@ -100,6 +109,7 @@ data class EffortView(
     val reasons: List<Pair<String, Int>> = emptyList(),
     val quality: Quality = EffortCore.qualitySummary(emptyList()),
     val lastVote: String? = null,
+    val lanes: List<LaneInfo> = emptyList(),
 )
 
 /** One state.json found on disk: its folder and the raw JSON (kept whole, so a reset loses nothing). */
@@ -126,7 +136,13 @@ object EffortCore {
             )
         }
         val log = entries.map { it.struggled }
-        return EffortState(
+        val lanesRaw = raw["lanes"] as? Map<*, *>
+        val lanes = listOf("chat" to "Chat", "cli" to "CLI").mapNotNull { (k, label) ->
+            val l = lanesRaw?.get(k) as? Map<*, *> ?: return@mapNotNull null
+            val t = l["turn"] as? Map<*, *>
+            LaneInfo(k, label, num(l["streak"]) ?: 0, num(l["calm"]) ?: 0, t?.get("struggled") == true, t?.get("reason") as? String, l["last"] as? String)
+        }
+        val base = EffortState(
             cwd = raw["cwd"] as? String,
             streak = num(raw["streak"]) ?: 0,
             calm = num(raw["calm"]) ?: 0,
@@ -139,7 +155,22 @@ object EffortCore {
             session = session(raw["session"]),
             sessions = (raw["sessions"] as? List<*>).orEmpty().mapNotNull { session(it) },
             entries = entries,
+            lanes = lanes,
         )
+        if (lanes.isEmpty()) return base
+        // The main view follows the lane that needs attention most, then the most recent one.
+        val primary = lanes.sortedWith(
+            compareByDescending<LaneInfo> { rank(levelOf(base.copy(streak = it.streak, calm = it.calm, struggling = it.struggling, lanes = emptyList()))) }
+                .thenByDescending { it.last ?: "" },
+        ).first()
+        return base.copy(streak = primary.streak, calm = primary.calm, struggling = primary.struggling, reason = primary.reason, lane = primary.label)
+    }
+
+    private fun rank(level: Level): Int = when (level) {
+        Level.WARN -> 3
+        Level.WATCH -> 2
+        Level.CALM, Level.OK -> 1
+        else -> 0
     }
 
     fun copilotHome(env: Map<String, String> = System.getenv(), userHome: String = System.getProperty("user.home")): Path {
@@ -222,6 +253,19 @@ object EffortCore {
         next["pendingWarning"] = null
         next["started"] = true
         next["resetAt"] = now.toString()
+        val lanes = raw["lanes"] as? Map<*, *>
+        if (lanes != null) {
+            next["lanes"] = lanes.entries.associate { (k, v) ->
+                val lane = LinkedHashMap<String, Any?>()
+                (v as? Map<*, *>)?.forEach { (lk, lv) -> lane[lk.toString()] = lv }
+                lane["turn"] = linkedMapOf<String, Any?>("struggled" to false, "reason" to null, "command" to null)
+                lane["streak"] = 0
+                lane["calm"] = 0
+                lane["pendingWarning"] = null
+                lane["started"] = true
+                k.toString() to lane
+            }
+        }
         return next
     }
 
@@ -276,7 +320,7 @@ object EffortCore {
             Level.CALM -> Action.DOWN
             else -> null
         }
-        val kind = sessionKind(state.session?.source)
+        val kind = state.lane ?: sessionKind(state.session?.source)
         val tag = if (kind != null) " ($kind session)" else ""
         val base = when (action) {
             Action.MODEL_UP -> messages.escalate
@@ -289,6 +333,7 @@ object EffortCore {
         lines.add("Effort Guard: ${state.streak}/$threshold struggling turns in a row")
         lines.add("Turns logged: ${state.log.size}, struggling: ${state.log.count { it }}")
         if (state.struggling) lines.add("Current turn: struggling (${state.reason})")
+        state.lanes.forEach { lines.add("${it.label}: ${it.streak}/$threshold in a row" + if (it.struggling) ", current turn struggling" else "") }
         if (hint != null) lines.add(hint)
         val q = qualitySummary(state.entries)
         if (q.score != null) lines.add("Result quality: ${q.score}% (${q.level}) over ${q.rated} turns")
@@ -304,6 +349,7 @@ object EffortCore {
             cwd = state.cwd, updated = state.updated, resetAt = raw?.get("resetAt") as? String,
             history = dailyHistory(state.entries), reasons = reasonCounts(state.entries),
             quality = qualitySummary(state.entries), lastVote = state.entries.lastOrNull()?.vote,
+            lanes = state.lanes,
         )
     }
 

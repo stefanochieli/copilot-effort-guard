@@ -7,7 +7,7 @@
     Shows how hard the GitHub Copilot model is struggling, as a colour bar in the status bar and in a tool window.
     <ul>
       <li>Status bar: <code>🟢 ▰▱▱ 1/3</code>, a segmented bar of struggling turns in a row, with a colour per state.</li>
-      <li>Tool window <b>Effort Guard</b>: big bar, progress towards a clean run, coloured history of the last turns, advice and sessions.</li>
+      <li>Tool window <b>Effort Guard</b>: big bar, progress towards a clean run, coloured history of the last turns, advice, Chat and CLI side by side (each with its own streak) and sessions.</li>
       <li>Advice in two steps: raise the thinking effort, then switch to a more powerful model; downgrade when the task looks easy.</li>
       <li><b>Reset</b> button (and <i>Tools | Effort Guard: Reset</i>) after changing model or thinking effort.</li>
     </ul>
