@@ -188,7 +188,11 @@ test('thresholds file: validated, merged with other keys', () => {
 
 test('CSV export: one row per turn, quoted when needed, no commands', () => {
   const csv = lib.toCsv([{ dir: 'd', state: { cwd: 'C:\\a,b', log: [{ ts: 't1', struggled: true, reason: 'tool_error', streak: 1 }] } }])
-  assert.equal(csv, 'project,timestamp,struggled,reason,streak,tests,rework,reedits,vote,quality\n"C:\\a,b",t1,true,tool_error,1,,,,,\n')
+  assert.equal(csv, 'project,timestamp,struggled,reason,streak,tests,rework,reedits,vote,quality,kind,session,agent,episode,cleared\n"C:\\a,b",t1,true,tool_error,1,,,,,,,,,,\n')
+  const tagged = lib.toCsv([{ dir: 'd', state: { log: [{ ts: 't2', struggled: false, reason: null, streak: 0, tests: 'green', kind: 'cli', session: 'ab12', agent: 'reviewer', episode: 'gap', cleared: 'tool_error' }] } }])
+  assert.equal(tagged.split('\n')[1], 'd,t2,false,,0,green,,,,1,CLI,ab12,reviewer,gap,tool_error')
+  // The first ten columns keep their position: old exports and new ones line up.
+  assert.deepEqual(tagged.split('\n')[0].split(',').slice(0, 10), ['project', 'timestamp', 'struggled', 'reason', 'streak', 'tests', 'rework', 'reedits', 'vote', 'quality'])
 })
 
 test('hooksStatus: not installed, installed per repo, outdated per-user copy', () => {
