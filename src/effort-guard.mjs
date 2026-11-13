@@ -152,6 +152,7 @@ export function resetState(state, now = new Date()) {
     pendingWarning: null,
     started: true,
     resetAt: now.toISOString(),
+    ...(state.lanes ? { lanes: Object.fromEntries(Object.entries(state.lanes).map(([k, v]) => [k, { ...v, turn: { struggled: false, reason: null, command: null }, streak: 0, calm: 0, pendingWarning: null, started: true }])) } : {}),
   }
 }
 
@@ -161,6 +162,39 @@ export function touchSession(sessions, session, now = new Date(), limit = 5) {
   if (!session) return list
   const rest = list.filter(x => !(x.id === session.id && x.source === session.source))
   return [{ source: session.source, id: session.id, last: now.toISOString() }, ...rest].slice(0, limit)
+}
+
+// Copilot Chat (VS Code agent) and Copilot CLI often work in the same folder at the
+// same time. Each has its own lane: its own open turn, streak and clean run, so a
+// prompt in one never closes the other's turn. The turn log is shared (each entry
+// says which lane wrote it) and the top-level fields mirror the lane that acted
+// last, so older extensions keep working.
+export const LANES = ['chat', 'cli']
+const LANE_KEYS = ['turn', 'streak', 'calm', 'pendingWarning', 'lastPromptKey', 'recentFiles', 'started']
+
+export function laneOf(source) {
+  return source === 'vscode-chat' ? 'chat' : 'cli'
+}
+
+function laneFields(state) {
+  const out = {}
+  for (const k of LANE_KEYS) if (state[k] !== undefined) out[k] = state[k]
+  return out
+}
+
+// The state one lane works on: its own fields plus the shared log.
+export function laneView(state, lane) {
+  const own = state.lanes?.[lane]
+  if (own) return { ...own, turn: own.turn ?? { struggled: false, reason: null, command: null }, streak: own.streak ?? 0, log: state.log }
+  // A state written before lanes existed belongs to whichever lane comes first.
+  if (!state.lanes) return { ...laneFields(state), log: state.log }
+  return { turn: { struggled: false, reason: null, command: null }, streak: 0, calm: 0, pendingWarning: null, fresh: true, log: state.log }
+}
+
+export function mergeLane(state, lane, next, now = new Date()) {
+  const own = { ...laneFields(next), last: now.toISOString() }
+  const { last, ...mirror } = own
+  return { ...state, ...mirror, log: next.log, lanes: { ...(state.lanes ?? {}), [lane]: own }, lane }
 }
 
 // Pure state transitions: the CLI wrapper below only does I/O.
@@ -227,7 +261,7 @@ function reedits(files, recent) {
 // Closes the previous turn: updates the streak and log. Returns the warning to
 // show, if the streak just reached the threshold.
 export function closeTurn(state, threshold, now = new Date(), calmThreshold = DEFAULT_CALM) {
-  if (state.log.length === 0 && !state.turn.struggled && state.streak === 0 && !state.started) {
+  if ((state.log.length === 0 || state.fresh) && !state.turn.struggled && state.streak === 0 && !state.started) {
     return { state: { ...state, started: true }, warning: null, notice: null }
   }
 
@@ -283,7 +317,8 @@ export function summary(state) {
 
   const q = qualitySummary(state.log)
   const quality = q.score === null ? '' : ` Result quality ${q.score}% (${q.level}, ${q.rated} rated turns).`
-  return `effort-guard: ${state.log.length} turns, ${struggled.length} struggling${top ? ` (most common: ${top[0]})` : ''}.${quality}`
+  const lanes = state.lanes ? ' ' + LANES.filter(l => state.lanes[l]).map(l => `${l === 'chat' ? 'Chat' : 'CLI'}: ${state.lanes[l].streak ?? 0} in a row`).join(', ') + '.' : ''
+  return `effort-guard: ${state.log.length} turns, ${struggled.length} struggling${top ? ` (most common: ${top[0]})` : ''}.${quality}${lanes}`
 }
 
 // Per-project thresholds: `.effort-guard.json` in the working directory or one of its
@@ -522,7 +557,7 @@ export function promptKey(payload) {
   return session !== undefined && ts !== undefined ? `${session}|${ts}` : null
 }
 
-export function run(event, payload, state, threshold, now = new Date(), calmThreshold = DEFAULT_CALM) {
+export function run(event, payload, state, threshold, now = new Date(), calmThreshold = DEFAULT_CALM, lane = null) {
   if (event === 'prompt') {
     // The same hook registered twice (user and repository files) delivers the same
     // prompt twice: closing the turn twice would see a clean turn and reset the streak.
@@ -532,9 +567,18 @@ export function run(event, payload, state, threshold, now = new Date(), calmThre
     }
     const closed = closeTurn(state, threshold, now, calmThreshold)
     let next = key ? { ...closed.state, lastPromptKey: key } : closed.state
-    // A prompt asking to fix or redo marks the turn it reacts to (the one just closed).
-    if (next.log.length && looksLikeRework(pick(payload, 'prompt', 'user_prompt', 'userPrompt'))) {
-      next = { ...next, log: [...next.log.slice(0, -1), { ...next.log.at(-1), rework: true }] }
+    if (lane && next.log.length > state.log.length) {
+      next = { ...next, log: [...next.log.slice(0, -1), { ...next.log.at(-1), kind: lane }] }
+    }
+    // A prompt asking to fix or redo marks the turn it reacts to: the last one closed
+    // in the same lane (Chat and CLI turns interleave in the shared log).
+    if (looksLikeRework(pick(payload, 'prompt', 'user_prompt', 'userPrompt'))) {
+      const i = next.log.findLastIndex(e => !lane || !e.kind || e.kind === lane)
+      if (i >= 0) {
+        const log = [...next.log]
+        log[i] = { ...log[i], rework: true }
+        next = { ...next, log }
+      }
     }
     return { state: next, stderr: closed.warning, stdout: null, notice: closed.notice }
   }
@@ -763,12 +807,14 @@ function main() {
   const { threshold, calmThreshold } = thresholds(process.env, projectConfig(activeCwd))
   withLock(path, () => {
     const before = load(path)
-    const result = run(event, payload, before, threshold, new Date(), calmThreshold)
+    const session = readSession(payload)
+    const lane = laneOf(session.source)
+    const now = new Date()
+    const result = run(event, payload, laneView(before, lane), threshold, now, calmThreshold, lane)
     if (result.duplicate) {
       return
     }
-    const session = readSession(payload)
-    result.state = { ...result.state, cwd: activeCwd, updated: new Date().toISOString(), threshold, calmThreshold, session, sessions: touchSession(before.sessions, session), resetAt: before.resetAt }
+    result.state = { ...mergeLane(before, lane, result.state, now), cwd: activeCwd, updated: new Date().toISOString(), threshold, calmThreshold, session, sessions: touchSession(before.sessions, session), resetAt: before.resetAt }
     save(path, result.state)
     logEvent(event, payload, result.state)
     // The warning is logged once, when the prompt hook produces it; the copy handed

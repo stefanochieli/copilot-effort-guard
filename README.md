@@ -1,12 +1,13 @@
 # copilot-effort-guard
 
-Hook per **GitHub Copilot** (Copilot CLI e agent hooks di VS Code) che osserva i turni dell'agente e, dopo N turni "faticosi" consecutivi, avvisa di passare a un modello più forte o a più reasoning effort. Solo osservazione: non blocca mai un tool. Derivato dalla mod [claude-effort-guard](https://github.com/stefanochieli/claude-effort-guard) (ramo `feat/copilot-hooks`).
+Hook per **GitHub Copilot** che osserva i turni dell'agente e, dopo N turni "faticosi" consecutivi, avvisa di passare a un modello più forte o a più reasoning effort. Funziona con la **Copilot Chat in modalità agent di VS Code** e con la **Copilot CLI**, anche in parallelo nella stessa cartella: ognuna ha la sua serie. Solo osservazione: non blocca mai un tool. Derivato dalla mod [claude-effort-guard](https://github.com/stefanochieli/claude-effort-guard) (ramo `feat/copilot-hooks`).
 
 ## Come funziona
 
 - **Turno faticoso**: un tool fallito (`postToolUseFailure` o `resultType: "failure"`), un comando di test/build (`npm test`, `ng test`, `mvn`, `gradle`, `pytest`, `go test`…) il cui output contiene un fallimento anche con exit code 0, un comando shell con exit code diverso da 0 (letto da `exitCode`/`exit_code` o dal testo "exit code N"; ignorato per `grep`, `diff`, `test`…), oppure lo stesso comando fallito due volte nel turno. Se nello stesso turno un comando di test/build riesce dopo un fallimento (rosso poi verde) il turno non conta come faticoso (`EFFORT_GUARD_RED_GREEN=0` lo disattiva).
 - **Escalation**: alla soglia (default 3) l'avviso va su stderr e viene offerto all'agente come `additionalContext`. Un turno pulito azzera la serie.
 - **Stato**: `.effort-guard/state.json` (l'installazione per repository aggiunge `.effort-guard/` al `.gitignore` del repo, salvo `--no-gitignore`); cartella cambiabile con `EFFORT_GUARD_DIR`, soglia con `EFFORT_GUARD_THRESHOLD`. Soglie per progetto: `.effort-guard.json` (`{"threshold": 4, "calmThreshold": 10}`) nella cartella o in una cartella superiore, scritto anche dalle estensioni e committabile per condividerlo col team; le variabili d'ambiente hanno la precedenza.
+- **Chat e CLI in parallelo**: ogni cartella ha due corsie, *Chat* (agent di VS Code) e *CLI* (Copilot CLI, anche lanciata dal terminale di VS Code o da un agente). Ognuna ha il suo turno aperto, la sua serie e la sua serie pulita, quindi un prompt della CLI non chiude il turno della Chat. Il log dei turni è comune e ogni voce dice da quale corsia viene. La sorgente si riconosce dal payload (nome dell'evento, campi in snake_case, `transcript_path`) e dall'ambiente dell'extension host di VS Code; `payloads` e `doctor` (`src=`) mostrano cosa è stato rilevato.
 - `npm run summary` stampa il riepilogo dei turni.
 
 ## Qualità del risultato

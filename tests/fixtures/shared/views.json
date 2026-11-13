@@ -112,6 +112,69 @@
       "action": "thinking-up",
       "bar": "▰▰▰▰▰▰▰▰▰▰",
       "hint": "12 struggling turns in a row: raise the thinking / reasoning effort, the task may need more deliberation."
+    },
+    {
+      "name": "lanes: chat struggles while the CLI is fine",
+      "state": {
+        "threshold": 3,
+        "calmThreshold": 8,
+        "streak": 0,
+        "calm": 1,
+        "turn": {},
+        "log": [],
+        "lane": "cli",
+        "lanes": {
+          "chat": {
+            "streak": 3,
+            "calm": 0,
+            "turn": {
+              "struggled": true,
+              "reason": "tool_error"
+            },
+            "last": "2026-11-13T10:00:00.000Z"
+          },
+          "cli": {
+            "streak": 0,
+            "calm": 1,
+            "turn": {},
+            "last": "2026-11-13T10:05:00.000Z"
+          }
+        }
+      },
+      "level": "warn",
+      "action": "thinking-up",
+      "bar": "▰▰▰",
+      "hint": "3 struggling turns in a row: raise the thinking / reasoning effort, the task may need more deliberation. (Chat session)"
+    },
+    {
+      "name": "lanes: both clean, the most recent lane wins",
+      "state": {
+        "threshold": 3,
+        "calmThreshold": 8,
+        "streak": 0,
+        "calm": 0,
+        "turn": {},
+        "log": [],
+        "lane": "chat",
+        "lanes": {
+          "chat": {
+            "streak": 0,
+            "calm": 2,
+            "turn": {},
+            "last": "2026-11-13T10:00:00.000Z"
+          },
+          "cli": {
+            "streak": 0,
+            "calm": 8,
+            "turn": {},
+            "last": "2026-11-13T10:05:00.000Z"
+          }
+        }
+      },
+      "level": "calm",
+      "action": "down",
+      "bar": "▱▱▱",
+      "hint": "8 clean turns in a row, the task looks easy: downgrade to a lighter model or lower the thinking effort to save tokens. (CLI session)"
     }
   ],
   "notify": [

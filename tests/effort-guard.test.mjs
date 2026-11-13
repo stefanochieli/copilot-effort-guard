@@ -480,3 +480,57 @@ test('quality signals: last test outcome, re-edited files, rework on the closed 
 test('hostEnv lists only variable names, never values', () => {
   assert.deepEqual(hostEnv({ ELECTRON_RUN_AS_NODE: '1', TERM_PROGRAM: 'vscode', SECRET: 'x', VSCODE_PID: '' }), ['ELECTRON_RUN_AS_NODE', 'TERM_PROGRAM'])
 })
+
+import { laneOf, laneView, mergeLane, resetState as resetLanes } from '../src/effort-guard.mjs'
+
+test('Chat and CLI in the same folder keep separate turns and streaks', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'eg-lanes-'))
+  const env = { ...process.env, EFFORT_GUARD_DIR: dir, EFFORT_GUARD_THRESHOLD: '5' }
+  delete env.ELECTRON_RUN_AS_NODE
+  delete env.VSCODE_CRASH_REPORTER_PROCESS_TYPE
+  const call = (payload, arg) => execFileSync('node', ['src/effort-guard.mjs', ...(arg ? [arg] : [])], { input: JSON.stringify(payload), env, encoding: 'utf8' })
+  const chatPrompt = { hook_event_name: 'UserPromptSubmit', session_id: 'chat-1', prompt: 'go' }
+  const chatFail = { hook_event_name: 'PostToolUse', session_id: 'chat-1', tool_name: 'run_in_terminal', tool_input: { command: 'mvn test' }, tool_response: 'BUILD FAILURE' }
+  const cliPrompt = { sessionId: 'cli-1', prompt: 'go' }
+  const cliOk = { sessionId: 'cli-1', toolName: 'bash', toolArgs: { command: 'ls' }, toolResult: { resultType: 'success', textResultForLlm: 'ok' } }
+  call(chatPrompt)
+  call(chatFail) // the chat turn is struggling...
+  call(cliPrompt, 'prompt') // ...and a CLI prompt in between must not close it
+  call(cliOk, 'tool')
+  call(chatPrompt) // closes the chat turn: chat streak 1
+  call(cliPrompt, 'prompt') // closes the clean CLI turn
+  const state = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8'))
+  assert.equal(state.lanes.chat.streak, 1)
+  assert.equal(state.lanes.cli.streak, 0)
+  assert.equal(state.lane, 'cli')
+  const kinds = state.log.map(e => `${e.kind}:${e.struggled}`)
+  assert.ok(kinds.includes('chat:true'), kinds.join(','))
+  assert.ok(!kinds.includes('cli:true'), kinds.join(','))
+  assert.match(call({}, 'summary'), /Chat: 1 in a row, CLI: 0 in a row/)
+})
+
+test('a state written before lanes goes to the first lane; reset clears every lane', () => {
+  const legacy = { turn: { struggled: true, reason: 'tool_error', command: null }, streak: 2, calm: 0, log: [{ ts: 't', struggled: true, streak: 2 }], started: true }
+  assert.equal(laneView(legacy, 'cli').streak, 2)
+  const merged = mergeLane(legacy, 'cli', { ...laneView(legacy, 'cli'), streak: 3 })
+  assert.equal(merged.lanes.cli.streak, 3)
+  assert.equal(laneView(merged, 'chat').streak, 0)
+  assert.equal(laneView(merged, 'chat').fresh, true)
+  const both = mergeLane(merged, 'chat', { ...laneView(merged, 'chat'), streak: 1 })
+  const r = resetLanes(both)
+  assert.equal(r.lanes.cli.streak, 0)
+  assert.equal(r.lanes.chat.streak, 0)
+  assert.equal(laneOf('vscode-chat'), 'chat')
+  assert.equal(laneOf('cli@vscode'), 'cli')
+})
+
+test('a new lane does not log an empty turn on its first prompt; rework marks the same lane', () => {
+  let s = { ...emptyState(), log: [{ ts: 'a', struggled: false, streak: 0, kind: 'cli' }], started: true }
+  const chat = run('prompt', { prompt: 'start' }, laneView({ ...s, lanes: { cli: { streak: 0 } } }, 'chat'), 3, new Date(), 8, 'chat')
+  assert.equal(chat.state.log.length, 1)
+  s = { ...emptyState(), log: [{ ts: 'a', struggled: false, streak: 0, kind: 'chat' }, { ts: 'b', struggled: false, streak: 0, kind: 'cli' }], started: true }
+  const r = run('prompt', { prompt: 'non funziona, rifai' }, { ...s, fresh: undefined }, 3, new Date(), 8, 'chat')
+  const chatEntries = r.state.log.filter(e => e.kind === 'chat')
+  assert.equal(chatEntries.at(-1).rework, true)
+  assert.equal(r.state.log.find(e => e.ts === 'b').rework, undefined)
+})

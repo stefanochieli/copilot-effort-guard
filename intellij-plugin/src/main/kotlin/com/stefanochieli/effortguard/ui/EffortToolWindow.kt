@@ -273,7 +273,7 @@ class EffortPanel(project: Project) : JPanel(BorderLayout()), Disposable {
         historyTitle.foreground = UIUtil.getContextHelpForeground()
         column.add(historyTitle)
         column.add(reasonsArea)
-        column.add(title("SESSIONS IN THIS FOLDER"))
+        column.add(title("CHAT, CLI AND SESSIONS"))
         column.add(sessionsArea)
         column.add(resetButton)
         column.add(thresholdsButton)
@@ -349,8 +349,11 @@ class EffortPanel(project: Project) : JPanel(BorderLayout()), Disposable {
         val sessions = view.sessions.mapIndexed { i, s ->
             "${s.kind ?: s.source} / ${s.id}${if (i == 0) " (latest)" else ""}  ${EffortCore.ageText(s.last)}"
         }
-        sessionsArea.text = if (sessions.isEmpty()) "-" else sessions.joinToString("\n") +
-            "\nStreaks are counted per folder, shared by these sessions."
+        val lanes = view.lanes.map {
+            "${it.label}: ${it.streak}/${view.threshold} in a row${if (it.struggling) ", turn struggling" else ""}, last hook ${EffortCore.ageText(it.last)}"
+        }
+        sessionsArea.text = (lanes + listOf("").filter { lanes.isNotEmpty() } + sessions).ifEmpty { listOf("-") }.joinToString("\n") +
+            if (sessions.isEmpty()) "" else "\nChat and CLI have separate streaks in each folder; CLI sessions share theirs."
         val session = view.session?.let { "${it.source} / ${it.id}" } ?: "-"
         metaArea.text = "Session: $session\nFolder: ${view.cwd ?: "-"}\nLast activity: ${EffortCore.ageText(view.updated)}"
         revalidate()
