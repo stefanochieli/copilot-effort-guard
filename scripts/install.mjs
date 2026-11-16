@@ -4,7 +4,7 @@
 //   node scripts/install.mjs --user       -> ~/.copilot/effort-guard/ + ~/.copilot/hooks/effort-guard.json (personal, Copilot CLI and VS Code)
 //   node scripts/install.mjs --user --uninstall   (or <repo-dir> --uninstall) removes the code and hook file it wrote, keeps the recorded state
 //   --no-gitignore   (repo install) do not add .effort-guard/ to the repo's .gitignore
-import { mkdirSync, copyFileSync, writeFileSync, readFileSync, appendFileSync, rmSync, rmdirSync, existsSync } from 'node:fs'
+import { mkdirSync, copyFileSync, writeFileSync, readFileSync, appendFileSync, rmSync, rmdirSync, existsSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -19,8 +19,9 @@ if (!target) {
 }
 
 const user = target === '--user'
-if (target === '--uninstall') {
-  console.error('usage: node scripts/install.mjs <repo-dir> | --user [--uninstall]')
+// Any other option in first position (--help, --uninstall, a typo) is not a folder name.
+if (!user && target.startsWith('-')) {
+  console.error('usage: node scripts/install.mjs <repo-dir> | --user [--uninstall] [--no-gitignore]')
   process.exit(1)
 }
 const base = user ? (process.env.COPILOT_HOME ?? join(homedir(), '.copilot')) : resolve(target)
@@ -29,7 +30,9 @@ const hooksDir = user ? join(base, 'hooks') : join(base, '.github', 'hooks')
 const entry = user ? join(codeDir, 'effort-guard.mjs') : '.effort-guard-hooks/effort-guard.mjs'
 const cmd = event => `node "${entry}" ${event}`
 
-const SRC_FILES = ['effort-guard.mjs', 'detect.mjs', 'report.mjs', 'redact.mjs', 'quality.mjs', 'benign.mjs']
+// Every module of src/: a hard-coded list forgets the next new file, and a missing
+// import makes every hook fail without a visible error.
+const SRC_FILES = readdirSync(join(root, 'src')).filter(f => f.endsWith('.mjs'))
 const CODE_FILES = [...SRC_FILES, 'package.json']
 
 if (uninstall) {

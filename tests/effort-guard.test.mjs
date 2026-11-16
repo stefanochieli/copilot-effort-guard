@@ -641,3 +641,87 @@ test('log entries carry the session and, when the host sends one, the agent', ()
   const anon = runHook('prompt', { prompt: 'go' }, s, 3, new Date(), 8, 'cli', { session: { id: '-', source: 'cli' } })
   assert.equal('session' in anon.state.log.at(-1), false)
 })
+
+// --- Review of 2026-11-16 ------------------------------------------------------------
+import { sameFile } from '../src/effort-guard.mjs'
+import { exitCodeOf as exitCodeFrom } from '../src/detect.mjs'
+import { symlinkSync, readdirSync } from 'node:fs'
+
+test('a full log (500 turns) still tags the new turn with lane, session and rework', () => {
+  let s = { ...emptyState(), started: true }
+  for (let i = 0; i < 503; i++) {
+    s = runHook('prompt', { sessionId: 'a', timestamp: i, prompt: i === 502 ? 'non funziona, riprova' : 'next' }, s, 3, new Date(), 8, 'cli', { session: { id: 'abc', source: 'cli' } }).state
+  }
+  assert.equal(s.log.length, 500)
+  assert.equal(s.log.at(-1).kind, 'cli')
+  assert.equal(s.log.at(-1).session, 'abc')
+  assert.equal(s.log.at(-1).rework, true)
+})
+
+test('the first prompt of a lane closes no turn, so a rework prompt marks nothing', () => {
+  const old = { ts: 'x', struggled: false, reason: null, streak: 0 }
+  const r = runHook('prompt', { prompt: 'riprova' }, { ...emptyState(), log: [old], fresh: true }, 3, new Date(), 8, 'cli')
+  assert.equal(r.state.log.length, 1)
+  assert.equal(r.state.log[0].rework, undefined)
+})
+
+test('failure events carry the message in `error`: benign and missing-command rules see it', () => {
+  const fail = error => ({ toolName: 'view', toolArgs: '{}', error })
+  assert.equal(readTool(fail('boom')).text, 'boom')
+  assert.equal(readTool(fail({ message: 'boom', name: 'ToolError' })).text, 'boom')
+  assert.equal(onTool(emptyState(), fail('view_range out of bounds'), { failed: true }).turn.struggled, false)
+  assert.equal(onTool(emptyState(), fail('tool crashed'), { failed: true }).turn.struggled, true)
+  const missing = { toolName: 'powershell', toolArgs: { command: 'python x.py' }, error: 'python was not found' }
+  assert.equal(onTool(emptyState(), missing, { failed: true }).turn.struggled, false, 'first missing command of the turn is forgiven')
+})
+
+test('EFFORT_GUARD_RED_GREEN=0 also keeps a turn whose last test run is green as a struggle', () => {
+  const turn = { struggled: true, reason: 'exit_code', command: 'x', tests: 'green' }
+  assert.equal(closeTurn({ ...emptyState(), started: true, turn }, 3).state.streak, 0)
+  process.env.EFFORT_GUARD_RED_GREEN = '0'
+  try {
+    assert.equal(closeTurn({ ...emptyState(), started: true, turn }, 3).state.streak, 1)
+  } finally {
+    delete process.env.EFFORT_GUARD_RED_GREEN
+  }
+})
+
+test('exit code in the text: the last one printed wins', () => {
+  assert.equal(exitCodeFrom({}, 'step 1 exited with exit code 1\nretry\nexit code: 0'), 0)
+  assert.equal(exitCodeFrom({}, 'exit code 0\n...\nexited with exit code 2'), 2)
+})
+
+test('sameFile compares real paths (links), not spellings', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'eg-same-'))
+  const file = join(dir, 'a.mjs')
+  writeFileSync(file, '')
+  assert.equal(sameFile(file, join(dir, '.', 'a.mjs')), true)
+  assert.equal(sameFile(file, join(dir, 'b.mjs')), false)
+  assert.equal(sameFile(undefined, file), false)
+  if (process.platform !== 'win32') {
+    symlinkSync(dir, `${dir}-link`)
+    assert.equal(sameFile(file, join(`${dir}-link`, 'a.mjs')), true)
+  }
+})
+
+test('read-only commands never move a state file they cannot parse', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'eg-ro-'))
+  writeFileSync(join(dir, 'state.json'), '{"turn":{"struggled":fal')
+  const env = { ...process.env, EFFORT_GUARD_DIR: dir }
+  for (const cmd of ['status', 'summary', 'doctor']) {
+    execFileSync('node', ['src/effort-guard.mjs', cmd], { env, encoding: 'utf8' })
+  }
+  assert.equal(existsSync(join(dir, 'state.json')), true)
+  assert.equal(existsSync(join(dir, 'state.json.bad')), false)
+  // A hook, which holds the lock, still sets it aside and starts again.
+  execFileSync('node', ['src/effort-guard.mjs', 'prompt'], { env, input: '{}', encoding: 'utf8' })
+  assert.equal(existsSync(join(dir, 'state.json.bad')), true)
+})
+
+test('installer: an option in place of the folder is refused, every src module is copied', () => {
+  assert.throws(() => execFileSync('node', ['scripts/install.mjs', '--help'], { encoding: 'utf8', stdio: 'pipe' }))
+  const home = mkdtempSync(join(tmpdir(), 'eg-inst-'))
+  execFileSync('node', ['scripts/install.mjs', '--user'], { env: { ...process.env, COPILOT_HOME: home }, encoding: 'utf8' })
+  const src = readdirSync('src').filter(f => f.endsWith('.mjs')).sort()
+  assert.deepEqual(readdirSync(join(home, 'effort-guard')).filter(f => f.endsWith('.mjs')).sort(), src)
+})

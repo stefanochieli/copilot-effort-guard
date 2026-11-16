@@ -10,7 +10,7 @@
 // Observation only: it never denies a tool call. Payload field names are read
 // defensively because Copilot delivers camelCase or snake_case depending on the
 // event key casing and version.
-import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, readdirSync, statSync, renameSync, rmdirSync, rmSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, readdirSync, statSync, renameSync, rmdirSync, rmSync, realpathSync } from 'node:fs'
 import { dirname, join, relative, isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
@@ -44,7 +44,13 @@ export function readTool(payload) {
   const input = pick(payload, 'toolArgs', 'tool_input', 'toolInput') ?? {}
   const parsed = typeof input === 'string' ? safeJson(input) : input
   const result = pick(payload, 'toolResult', 'tool_response', 'toolResponse', 'tool_result') ?? {}
-  const text = typeof result === 'string' ? result : pick(result, 'textResultForLlm', 'text', 'stdout', 'output') ?? ''
+  let text = typeof result === 'string' ? result : pick(result, 'textResultForLlm', 'text', 'stdout', 'output') ?? ''
+  // postToolUseFailure and errorOccurred carry no result: the message is in `error`
+  // (a string, or { message }). Without it the benign-error rules never see the text.
+  if (text === '') {
+    const error = pick(payload, 'error')
+    text = typeof error === 'string' ? error : pick(error, 'message') ?? ''
+  }
 
   // Copilot CLI reports { resultType: 'success' | 'failure' | 'denied', textResultForLlm }.
   const resultType = typeof result === 'object' ? pick(result, 'resultType', 'result_type') : undefined
@@ -293,7 +299,8 @@ export function closeTurn(state, threshold, now = new Date(), calmThreshold = DE
 
   // A turn whose last test/build run is green ended well: whatever failed on the way
   // (a missing file, a refused command) was not a struggle.
-  const green = state.turn.tests === 'green'
+  // EFFORT_GUARD_RED_GREEN=0 turns this off too.
+  const green = state.turn.tests === 'green' && process.env.EFFORT_GUARD_RED_GREEN !== '0'
   const struggled = Boolean(state.turn.struggled) && !green
   const reason = struggled ? state.turn.reason : null
   const command = struggled ? state.turn.command : null
@@ -332,6 +339,7 @@ export function closeTurn(state, threshold, now = new Date(), calmThreshold = DE
     },
     warning,
     notice,
+    logged: true,
   }
 }
 
@@ -403,11 +411,34 @@ function normaliseCwd(cwd) {
   return process.platform === 'win32' ? s.replace(/\\/g, '/').toLowerCase() : s
 }
 
-function isUnder(file, dir) {
+function realPath(p) {
+  try {
+    return realpathSync(p)
+  } catch {
+    return resolve(String(p))
+  }
+}
+
+function under(file, dir) {
   const a = process.platform === 'win32' ? file.toLowerCase() : file
   const b = process.platform === 'win32' ? dir.toLowerCase() : dir
   const rel = relative(b, a)
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+}
+
+// Also true through a link: a home folder that is a junction or a symlink (redirected
+// profile, subst drive) must not send the per-user state into the projects.
+function isUnder(file, dir) {
+  return under(file, dir) || under(realPath(file), realPath(dir))
+}
+
+// Is `a` the same file as `b`? Windows spells one path in several ways (drive letter
+// case, junctions), and a plain string comparison would make the hook a silent no-op.
+export function sameFile(a, b) {
+  if (!a || !b) return false
+  const x = realPath(a)
+  const y = realPath(b)
+  return process.platform === 'win32' ? x.toLowerCase() === y.toLowerCase() : x === y
 }
 
 // Working directory of the session: the payload's `cwd` when it is a real folder,
@@ -453,7 +484,9 @@ export function validState(v) {
 
 // Unreadable or wrongly shaped files are moved to state.json.bad (one backup) and
 // the evaluation starts again, instead of failing on every hook call.
-function load(path) {
+// `repair: false` (read-only commands: doctor, status, watch, summary) never moves the
+// file: they read without the lock and may catch a write in progress.
+function load(path, { repair = true } = {}) {
   let raw
   try {
     raw = readFileSync(path, 'utf8')
@@ -466,9 +499,11 @@ function load(path) {
       return { ...emptyState(), ...parsed }
     }
   } catch {}
-  try {
-    renameSync(path, `${path}.bad`)
-  } catch {}
+  if (repair) {
+    try {
+      renameSync(path, `${path}.bad`)
+    } catch {}
+  }
   return emptyState()
 }
 
@@ -610,7 +645,8 @@ export function run(event, payload, state, threshold, now = new Date(), calmThre
     }
     const closed = closeTurn(state, threshold, now, calmThreshold)
     let next = key ? { ...closed.state, lastPromptKey: key } : closed.state
-    if (next.log.length > state.log.length) {
+    // Not `log.length` grew: a full log (LOG_LIMIT) keeps its length when a turn is added.
+    if (closed.logged) {
       // Who ran the turn: the lane, the session and (when the host says) the agent.
       const agent = agentOf(payload)
       const tags = { ...(lane ? { kind: lane } : {}), ...(session?.id && session.id !== '-' ? { session: session.id } : {}), ...(agent ? { agent } : {}), ...(state.episode ? { episode: state.episode } : {}) }
@@ -619,7 +655,7 @@ export function run(event, payload, state, threshold, now = new Date(), calmThre
     if (state.sessionId) next = { ...next, sessionId: state.sessionId }
     // A prompt asking to fix or redo marks the turn it reacts to: the last one closed
     // in the same lane (Chat and CLI turns interleave in the shared log).
-    if (looksLikeRework(pick(payload, 'prompt', 'user_prompt', 'userPrompt'))) {
+    if (closed.logged && looksLikeRework(pick(payload, 'prompt', 'user_prompt', 'userPrompt'))) {
       const i = next.log.findLastIndex(e => !lane || !e.kind || e.kind === lane)
       if (i >= 0) {
         const log = [...next.log]
@@ -719,7 +755,7 @@ function payloads() {
 function projectStates() {
   const root = join(homeDir(), 'state')
   try {
-    return readdirSync(root).map(d => ({ dir: join(root, d), state: load(join(root, d, 'state.json')) }))
+    return readdirSync(root).map(d => ({ dir: join(root, d), state: load(join(root, d, 'state.json'), { repair: false }) }))
   } catch {
     return []
   }
@@ -729,7 +765,7 @@ function doctor() {
   const dir = stateDir()
   const hooksFile = join(copilotHome(), 'hooks', 'effort-guard.json')
   const found = projectStates()
-  const own = existsSync(statePath()) ? [{ dir, state: load(statePath()) }] : []
+  const own = existsSync(statePath()) ? [{ dir, state: load(statePath(), { repair: false }) }] : []
   const projects = (found.length ? found : own).map(p => {
     const log = p.state.log ?? []
     const struggled = log.filter(e => e.struggled)
@@ -777,7 +813,7 @@ function barInfo(s) {
 const useColor = () => Boolean(process.stdout.isTTY) && !process.env.NO_COLOR
 
 function status() {
-  const s = load(statePath())
+  const s = load(statePath(), { repair: false })
   console.log(renderBar(barInfo(s), { color: useColor() }))
   console.log(`${summary(s)} | current turn ${s.turn.struggled ? `struggling (${s.turn.reason})` : 'ok'}`)
 }
@@ -787,7 +823,8 @@ function reset() {
   if (!existsSync(path)) {
     return console.log('effort-guard: nothing to reset in this folder yet.')
   }
-  save(path, resetState(load(path)))
+  // Same lock as the hooks: a reset must not overwrite an event written meanwhile.
+  withLock(path, () => save(path, resetState(load(path))))
   appendFileSync(join(homeDir(), 'events.log'), `${new Date().toISOString()} RESET cwd=${activeCwd}\n`)
   console.log('effort-guard: streaks reset, the evaluation starts again.')
 }
@@ -799,7 +836,7 @@ function watch() {
   let lastBar = null
   console.log('effort-guard watch (Ctrl+C to stop)')
   setInterval(() => {
-    const bar = renderBar(barInfo(load(statePath())), { color: useColor() })
+    const bar = renderBar(barInfo(load(statePath(), { repair: false })), { color: useColor() })
     if (bar !== lastBar) {
       console.log(bar)
       lastBar = bar
@@ -835,7 +872,7 @@ function main() {
     return payloads()
   }
   if (arg === 'summary') {
-    return console.log(summary(load(statePath())))
+    return console.log(summary(load(statePath(), { repair: false })))
   }
 
   const input = readStdin()
@@ -891,7 +928,7 @@ function main() {
   })
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (sameFile(process.argv[1], fileURLToPath(import.meta.url))) {
   try {
     main()
   } catch (err) {
