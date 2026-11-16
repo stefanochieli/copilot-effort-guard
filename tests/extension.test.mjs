@@ -280,3 +280,40 @@ test('reset from the extension clears both lanes', () => {
   assert.equal(next.lanes.cli.streak, 0)
   assert.equal(next.lanes.chat.turn.struggled, false)
 })
+
+// --- Review of 2026-11-16 ------------------------------------------------------------
+
+test('hooksStatus: a change in any bundled module is outdated, CRLF copies are not', () => {
+  const home = mkdtempSync(join(tmpdir(), 'eg-hs2-'))
+  const bundled = mkdtempSync(join(tmpdir(), 'eg-bundle2-'))
+  mkdirSync(join(home, 'hooks'))
+  writeFileSync(join(home, 'hooks', 'effort-guard.json'), '{}')
+  mkdirSync(join(home, 'effort-guard'))
+  for (const dir of [bundled, join(home, 'effort-guard')]) {
+    writeFileSync(join(dir, 'effort-guard.mjs'), 'a\nb\n')
+    writeFileSync(join(dir, 'detect.mjs'), 'one\n')
+  }
+  assert.equal(lib.hooksStatus(home, bundled).outdated, false)
+  writeFileSync(join(home, 'effort-guard', 'effort-guard.mjs'), 'a\r\nb\r\n')
+  assert.equal(lib.hooksStatus(home, bundled).outdated, false, 'line endings only')
+  writeFileSync(join(bundled, 'detect.mjs'), 'two\n')
+  assert.equal(lib.hooksStatus(home, bundled).outdated, true, 'detect.mjs changed')
+  writeFileSync(join(bundled, 'detect.mjs'), 'one\n')
+  writeFileSync(join(bundled, 'new.mjs'), 'x\n')
+  assert.equal(lib.hooksStatus(home, bundled).outdated, true, 'a module the installed copy does not have')
+})
+
+test('shouldNotify: Chat and CLI taking turns do not repeat the warning', () => {
+  const st = (top, chat, cli) => ({ streak: top, threshold: 3, lanes: { chat: { streak: chat }, cli: { streak: cli } } })
+  const seq = [st(3, 3, 0), st(0, 3, 0), st(3, 3, 0), st(0, 3, 0), st(1, 3, 1)]
+  assert.deepEqual(seq.slice(1).map((c, i) => lib.shouldNotify(seq[i], c)), [null, null, null, null])
+  assert.equal(lib.shouldNotify(st(1, 3, 2), st(3, 3, 3)), 'warn')
+})
+
+test('resetProject and voteLast read a state file that starts with a BOM', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'eg-bom-'))
+  writeFileSync(join(dir, 'state.json'), '﻿' + JSON.stringify({ streak: 2, turn: {}, log: [{ ts: 'x', struggled: true }] }))
+  assert.equal(lib.voteLast(dir, 'up'), 'up')
+  assert.equal(lib.resetProject(dir).streak, 0)
+  assert.equal(readdirSync(dir).some(f => f.endsWith('.tmp') || f.endsWith('.lock')), false)
+})

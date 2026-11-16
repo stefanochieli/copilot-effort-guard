@@ -3,6 +3,7 @@
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
+const crypto = require('node:crypto')
 
 function copilotHome(setting, env = process.env) {
   return setting || env.COPILOT_HOME || path.join(os.homedir(), '.copilot')
@@ -74,22 +75,25 @@ function findState(projects, folders) {
 // Starts the evaluation again for one project folder (same effect as `effort-guard reset`).
 function resetProject(dir, now = new Date()) {
   const file = path.join(dir, 'state.json')
-  const state = JSON.parse(fs.readFileSync(file, 'utf8'))
-  const next = {
-    ...state,
-    turn: { struggled: false, reason: null, command: null },
-    streak: 0,
-    calm: 0,
-    pendingWarning: null,
-    started: true,
-    resetAt: now.toISOString(),
-  }
-  if (state.lanes && typeof state.lanes === 'object') {
-    next.lanes = Object.fromEntries(Object.entries(state.lanes).map(([k, v]) => [k, { ...v, turn: { struggled: false, reason: null, command: null }, streak: 0, calm: 0, pendingWarning: null, started: true }]))
-  }
-  // Temporary file + rename: the hooks never read a half-written state.
-  withStateLock(file, () => writeStateAtomic(file, next))
-  return next
+  // Read and written under the hooks' lock: an event recorded meanwhile is not lost.
+  return withStateLock(file, () => {
+    const state = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''))
+    const next = {
+      ...state,
+      turn: { struggled: false, reason: null, command: null },
+      streak: 0,
+      calm: 0,
+      pendingWarning: null,
+      started: true,
+      resetAt: now.toISOString(),
+    }
+    if (state.lanes && typeof state.lanes === 'object') {
+      next.lanes = Object.fromEntries(Object.entries(state.lanes).map(([k, v]) => [k, { ...v, turn: { struggled: false, reason: null, command: null }, streak: 0, calm: 0, pendingWarning: null, started: true }]))
+    }
+    // Temporary file + rename: the hooks never read a half-written state.
+    writeStateAtomic(file, next)
+    return next
+  })
 }
 
 // --- Hooks installed by the extension -------------------------------------------------
@@ -102,12 +106,20 @@ function hooksStatus(home, bundledSrc, folders = []) {
   const repo = folders.some(f => fs.existsSync(path.join(f, '.github', 'hooks', 'effort-guard.json')))
   let outdated = false
   if (user && bundledSrc) {
+    // Every bundled module, not only the entry point: a release can change detect.mjs
+    // alone. Line endings are ignored (a copy made from a Windows clone has CRLF).
+    const text = f => fs.readFileSync(f, 'utf8').replace(/\r\n/g, '\n')
+    let modules = []
     try {
-      const installed = fs.readFileSync(path.join(home, 'effort-guard', 'effort-guard.mjs'), 'utf8')
-      outdated = installed !== fs.readFileSync(path.join(bundledSrc, 'effort-guard.mjs'), 'utf8')
-    } catch {
-      outdated = fs.existsSync(path.join(bundledSrc, 'effort-guard.mjs'))
-    }
+      modules = fs.readdirSync(bundledSrc).filter(f => f.endsWith('.mjs'))
+    } catch {}
+    outdated = modules.some(f => {
+      try {
+        return text(path.join(home, 'effort-guard', f)) !== text(path.join(bundledSrc, f))
+      } catch {
+        return true
+      }
+    })
   }
   return { installed: user || repo, user, repo, outdated }
 }
@@ -204,8 +216,15 @@ function withStateLock(file, fn) {
 
 function writeStateAtomic(file, state) {
   const tmp = `${file}.${process.pid}.ext.tmp`
-  fs.writeFileSync(tmp, JSON.stringify(state))
-  fs.renameSync(tmp, file)
+  const json = JSON.stringify(state)
+  fs.writeFileSync(tmp, json)
+  try {
+    fs.renameSync(tmp, file)
+  } catch {
+    // Windows can refuse to replace a file another process has open.
+    fs.writeFileSync(file, json)
+    fs.rmSync(tmp, { force: true })
+  }
   stateCache.delete(file)
 }
 
@@ -213,7 +232,7 @@ function writeStateAtomic(file, state) {
 function voteLast(dir, vote) {
   const file = path.join(dir, 'state.json')
   return withStateLock(file, () => {
-    const state = JSON.parse(fs.readFileSync(file, 'utf8'))
+    const state = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''))
     const log = Array.isArray(state.log) ? [...state.log] : []
     if (!log.length) return null
     const last = { ...log[log.length - 1] }
@@ -405,7 +424,7 @@ function adviceMessages(streak, threshold, calm) {
 }
 
 // Fixed per process: a new nonce on every render would reload the panel each time.
-const NONCE = Math.random().toString(36).slice(2)
+const NONCE = crypto.randomBytes(16).toString('base64')
 
 function esc(v) {
   return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
@@ -543,13 +562,20 @@ ${view.hooks?.outdated ? `<div class="hint">The installed hooks are older than t
 
 // Which notification to show, if any: 'warn' when the streak has just reached the
 // threshold, 'escalate' at twice the threshold, 'calm' at the calm threshold.
+// With Chat and CLI lanes each lane is compared with its own previous value: the
+// top-level streak mirrors whichever lane acted last, so it jumps between the two and
+// would raise the same notification again at every switch.
 function shouldNotify(prev, cur, fallbackThreshold = 3) {
   if (!cur) return null
   const threshold = cur.threshold || fallbackThreshold
-  if ((cur.streak || 0) >= threshold * 2 && (prev?.streak || 0) < threshold * 2) return 'escalate'
-  if ((cur.streak || 0) >= threshold && (prev?.streak || 0) < threshold) return 'warn'
   const calmThreshold = cur.calmThreshold || 8
-  if ((cur.calm || 0) >= calmThreshold && (prev?.calm || 0) < calmThreshold) return 'calm'
+  const lanes = cur.lanes && typeof cur.lanes === 'object' ? ['chat', 'cli'].filter(k => cur.lanes[k] && typeof cur.lanes[k] === 'object') : []
+  // A lane seen for the first time is compared with the state before lanes existed.
+  const pairs = lanes.length ? lanes.map(k => [prev?.lanes?.[k] ?? (prev?.lanes ? null : prev), cur.lanes[k]]) : [[prev, cur]]
+  const crossed = (key, limit) => pairs.some(([p, c]) => (c[key] || 0) >= limit && (p?.[key] || 0) < limit)
+  if (crossed('streak', threshold * 2)) return 'escalate'
+  if (crossed('streak', threshold)) return 'warn'
+  if (crossed('calm', calmThreshold)) return 'calm'
   return null
 }
 
