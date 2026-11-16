@@ -83,8 +83,16 @@ export function hostEnv(env = process.env) {
   return HOST_ENV.filter(k => env[k] !== undefined && env[k] !== '')
 }
 
+// Tool names only the VS Code agent has (the 2026-11-02 capture on a corporate account
+// showed read_file and grep_search; the CLI calls its tools bash, powershell, view, edit,
+// grep, glob). A strong signal even when the payload is in the CLI format and the process
+// environment says nothing. Not confirmed on more captures: `effort-guard payloads` lists
+// the names that arrive.
+const CHAT_TOOL = /^(run_in_terminal|read_file|grep_search|file_search|list_dir|semantic_search|replace_string_in_file|multi_replace_string_in_file|insert_edit_into_file|create_file|create_directory|get_errors|runTests|run_vs_code_task|fetch_webpage|vscode_|copilot_|mcp_)/
+
 export function sessionSource(payload, env = process.env) {
-  const chatPayload = CHAT_KEYS.some(k => pick(payload, k) !== undefined)
+  const chatTool = CHAT_TOOL.test(String(pick(payload, 'toolName', 'tool_name') ?? ''))
+  const chatPayload = chatTool || CHAT_KEYS.some(k => pick(payload, k) !== undefined)
   const inTerminal = Boolean(env.TERM_PROGRAM || env.WT_SESSION || env.TERM_SESSION_ID)
   const extensionHost = env.VSCODE_CRASH_REPORTER_PROCESS_TYPE === 'extensionHost' || (Boolean(env.ELECTRON_RUN_AS_NODE) && !inTerminal)
   if (chatPayload || extensionHost) {
@@ -894,6 +902,11 @@ function main() {
   withLock(path, () => {
     const before = load(path)
     const session = readSession(payload)
+    // A session that already showed itself as Chat stays Chat: its prompt events carry no
+    // tool name, so on their own they would look like the CLI and split one conversation
+    // over two lanes.
+    const known = session.id === '-' ? null : (before.sessions ?? []).find(x => x.id === session.id)
+    if (known?.source === 'vscode-chat') session.source = 'vscode-chat'
     const lane = laneOf(session.source)
     const now = new Date()
     // The pause is measured on prompts only: a long build inside a turn is not a pause.

@@ -163,7 +163,7 @@ test('event lines parse and folder names are extracted on Windows and POSIX path
   assert.equal(baseName('/a/b/proj/'), 'proj')
 })
 
-import { readSession, hostEnv } from '../src/effort-guard.mjs'
+import { readSession, hostEnv, sessionSource } from '../src/effort-guard.mjs'
 
 test('readSession tells VS Code chat from the CLI and falls back to the terminal tab id', () => {
   assert.deepEqual(readSession({ session_id: 'abc-12345678', hook_event_name: 'PostToolUse' }, {}), { id: '12345678', source: 'vscode-chat' })
@@ -724,4 +724,22 @@ test('installer: an option in place of the folder is refused, every src module i
   execFileSync('node', ['scripts/install.mjs', '--user'], { env: { ...process.env, COPILOT_HOME: home }, encoding: 'utf8' })
   const src = readdirSync('src').filter(f => f.endsWith('.mjs')).sort()
   assert.deepEqual(readdirSync(join(home, 'effort-guard')).filter(f => f.endsWith('.mjs')).sort(), src)
+})
+
+test('VS Code tool names mark a payload as Chat even in the CLI format, and the session stays Chat', () => {
+  const env = {}
+  assert.equal(sessionSource({ sessionId: 's1', toolName: 'read_file', toolArgs: '{}' }, env), 'vscode-chat')
+  assert.equal(sessionSource({ sessionId: 's1', toolName: 'bash', toolArgs: '{}' }, env), 'cli')
+  assert.equal(sessionSource({ sessionId: 's1', prompt: 'x' }, env), 'cli', 'a prompt alone says nothing')
+})
+
+test('a session first seen as Chat keeps its prompts in the Chat lane (hook end to end)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'eg-chat-'))
+  const env = { ...process.env, EFFORT_GUARD_DIR: dir, TERM_PROGRAM: '', WT_SESSION: '', ELECTRON_RUN_AS_NODE: '' }
+  const hook = (event, payload) => execFileSync('node', ['src/effort-guard.mjs', event], { env, input: JSON.stringify(payload), encoding: 'utf8' })
+  hook('tool', { sessionId: 'chat-0001', toolName: 'read_file', toolArgs: '{}' })
+  hook('prompt', { sessionId: 'chat-0001', timestamp: 1, prompt: 'next' })
+  const state = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8'))
+  assert.equal(state.lane, 'chat')
+  assert.deepEqual(Object.keys(state.lanes), ['chat'])
 })

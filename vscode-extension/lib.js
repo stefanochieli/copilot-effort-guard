@@ -275,6 +275,28 @@ function dailyHistory(log, days = 14, now = Date.now()) {
   return out
 }
 
+// The log split by where the turn ran, so the model for Chat and the one for the CLI
+// can be chosen on their own numbers. Turns logged before 0.12.0 carry no kind.
+const CHANNEL_LABEL = { chat: 'Chat', cli: 'CLI', unknown: 'Before the split' }
+
+function byChannel(log) {
+  const groups = { chat: [], cli: [], unknown: [] }
+  for (const e of log ?? []) (groups[e?.kind] ?? groups.unknown).push(e)
+  return Object.entries(groups).map(([kind, entries]) => {
+    const struggling = entries.filter(e => e?.struggled).length
+    return {
+      kind,
+      label: CHANNEL_LABEL[kind],
+      turns: entries.length,
+      struggling,
+      rate: entries.length ? Math.round((struggling / entries.length) * 100) : null,
+      quality: qualitySummary(entries),
+      reasons: reasonCounts(entries).slice(0, 2),
+      history: dailyHistory(entries),
+    }
+  })
+}
+
 // Most frequent reasons of struggling turns, most frequent first.
 function reasonCounts(log) {
   const counts = {}
@@ -407,6 +429,7 @@ function computeView(stateIn, fallbackThreshold = 3) {
     updated: state.updated ?? null,
     history: dailyHistory(log),
     reasons: reasonCounts(log),
+    channels: byChannel(log),
     quality: qualitySummary(log),
     lastVote: log.length ? log[log.length - 1].vote ?? null : null,
   }
@@ -482,6 +505,31 @@ ${parts.length ? `<div class="muted">${esc(parts.join(' \u00b7 '))}</div>` : ''}
 ${canVote ? `<div class="row vote"><button data-msg="vote-up" class="secondary${view.lastVote === 'up' ? ' on' : ''}" title="The last turn gave a good result">\u{1F44D} Good result</button><button data-msg="vote-down" class="secondary${view.lastVote === 'down' ? ' on' : ''}" title="The last turn gave a bad result">\u{1F44E} Bad result</button></div>` : ''}`
 }
 
+// Chat and CLI side by side: turns, how often they struggled, result quality, main causes
+// and a small history each. A Chat row with no turns while the CLI has some is said out
+// loud: the usual cause is that the Chat hooks are not running (or are seen as CLI).
+function channelsHtml(channels) {
+  const list = (channels ?? []).filter(c => c.turns > 0 || c.kind === 'chat')
+  if (!list.some(c => c.turns > 0)) return ''
+  const cli = list.find(c => c.kind === 'cli')
+  const rows = list
+    .map(c => {
+      const q = c.quality.score === null ? '-' : `${c.quality.score}%`
+      const why = c.reasons.map(r => `${esc(r.reason)} ${r.count}`).join(', ') || '-'
+      return `<tr><th>${esc(c.label)}</th><td>${c.turns}</td><td>${c.rate === null ? '-' : `${c.rate}%`}</td><td>${esc(q)}</td><td class="muted">${why}</td></tr>`
+    })
+    .join('')
+  const charts = list
+    .filter(c => c.turns > 0 && c.kind !== 'unknown' && c.history.some(d => d.turns))
+    .map(c => `<div class="muted">${esc(c.label)}</div>${historySvg(c.history)}`)
+    .join('')
+  const chat = list.find(c => c.kind === 'chat')
+  const warn = chat && chat.turns === 0 && cli && cli.turns > 0 ? `<div class="hint">No Chat turn recorded in this folder. If you use Copilot Chat here, its hooks are not reaching Effort Guard: run <code>node ~/.copilot/effort-guard/effort-guard.mjs doctor</code> and look at the <i>source</i> column.</div>` : ''
+  return `<h4>By channel</h4>
+<table class="channels"><tr><th></th><th>turns</th><th>struggling</th><th>quality</th><th>main causes</th></tr>${rows}</table>
+${charts}${warn}`
+}
+
 // HTML of the side panel: a segmented bar that changes colour with the model's effort level.
 function renderHtml(view, now = Date.now()) {
   const color = LEVEL_HEX[view.level]
@@ -538,6 +586,9 @@ function renderHtml(view, now = Date.now()) {
   .mini { display: flex; gap: 2px; margin: 4px 0; }
   .mini span { flex: 1; height: 6px; border-radius: 2px; background: var(--vscode-input-background, #3338); }
   .mini span.on { background: var(--l); }
+  .channels { width: 100%; border-collapse: collapse; font-size: .9em; }
+  .channels th, .channels td { text-align: left; padding: 2px 6px 2px 0; }
+  .channels tr:first-child th { opacity: .65; font-weight: 400; }
 </style></head><body>
 <div class="level"><b>${esc(view.label)}</b>${badge}<span class="count">${view.streak}/${view.threshold} struggling turns in a row</span></div>
 <div class="bar">${segs}</div>
@@ -548,6 +599,7 @@ ${qualityHtml(view)}
 <h4>Last turns</h4>
 <div class="timeline">${dots}</div>
 ${view.hint ? `<div class="hint">${esc(view.hint)}</div>` : ''}
+${channelsHtml(view.channels)}
 ${sessions ? `<h4>Sessions in this folder</h4><ul>${sessions}</ul><div class="muted">Chat and CLI have separate streaks in each folder; CLI sessions share theirs.</div>` : ''}
 ${view.history?.some(d => d.turns) ? `<h4>Last ${view.history.length} days</h4>${historySvg(view.history)}<div class="muted">${esc(view.history[0].day)} \u2192 ${esc(view.history.at(-1).day)} \u00b7 red: struggling turns</div>` : ''}
 ${view.reasons?.length ? `<h4>Why it struggled</h4><ul>${view.reasons.map(r => `<li>${esc(r.reason)}: ${r.count}</li>`).join('')}</ul>` : ''}
@@ -592,4 +644,4 @@ function formatReport(projects, now = Date.now()) {
     .join('\n\n')
 }
 
-module.exports = { qualityOf, qualitySummary, voteLast, QUALITY_HEX, hooksStatus, readConfig, writeConfig, validateThreshold, dailyHistory, reasonCounts, toCsv, historySvg, CONFIG_FILE, readState, resetProject, sessionKind, copilotHome, readProjects, findState, computeView, levelOf, textBar, renderHtml, shouldNotify, formatReport, isInside, LEVEL_THEME_COLOR, LEVEL_HEX }
+module.exports = { qualityOf, qualitySummary, voteLast, QUALITY_HEX, hooksStatus, readConfig, writeConfig, validateThreshold, dailyHistory, reasonCounts, toCsv, historySvg, CONFIG_FILE, readState, resetProject, sessionKind, copilotHome, readProjects, findState, computeView, byChannel, levelOf, textBar, renderHtml, shouldNotify, formatReport, isInside, LEVEL_THEME_COLOR, LEVEL_HEX }
