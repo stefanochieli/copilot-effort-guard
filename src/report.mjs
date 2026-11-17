@@ -73,7 +73,7 @@ export function formatDoctor(info, now = new Date()) {
     out.push(`  ${bad} hooks registered twice (user file and ${info.duplicateHooks}): each event runs two times; remove one of them`)
   }
   out.push(`  ${ok} threshold: ${info.threshold} struggling turns in a row`)
-  out.push(`  ${info.debug ? ok : '    '} payload dump ${info.debug ? 'on' : 'off (set EFFORT_GUARD_DEBUG=1 to enable)'}`)
+  out.push(`  ${info.debug ? ok : '    '} payload dump ${info.debug ? 'on' : 'off (use the extension button, or set EFFORT_GUARD_DEBUG=1)'}`)
   out.push(`        state for this folder: ${info.stateDir} (${info.stateExists ? 'exists' : 'not created yet'})`)
 
   const events = info.events.map(parseEventLine).filter(Boolean)

@@ -53,6 +53,14 @@
         "title": "Effort Guard: Export history as CSV"
       },
       {
+        "command": "effortGuard.toggleCapture",
+        "title": "Effort Guard: Switch payload capture on or off"
+      },
+      {
+        "command": "effortGuard.copyPayloadSummary",
+        "title": "Effort Guard: Copy the payload summary"
+      },
+      {
         "command": "effortGuard.voteUp",
         "title": "Effort Guard: The last result was good"
       },

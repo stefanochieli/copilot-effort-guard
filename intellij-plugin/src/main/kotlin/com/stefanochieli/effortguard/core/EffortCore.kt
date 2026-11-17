@@ -487,6 +487,31 @@ object EffortCore {
         }
     }
 
+    /** Flag file next to the hooks: they check it on every event, so no restart of the IDE is needed. */
+    const val CAPTURE_FLAG = "debug-capture"
+
+    fun captureFlag(home: Path): Path = home.resolve("effort-guard").resolve(CAPTURE_FLAG)
+
+    fun captureOn(home: Path): Boolean = Files.exists(captureFlag(home))
+
+    fun setCapture(home: Path, on: Boolean): Boolean {
+        val file = captureFlag(home)
+        if (on) {
+            Files.createDirectories(file.parent)
+            Files.writeString(file, "Payload capture is on: delete this file (or use the plugin button) to stop it.\n")
+        } else {
+            Files.deleteIfExists(file)
+        }
+        return on
+    }
+
+    /** Command (and environment) that prints the value-free summary of the captured payloads of one project. */
+    fun payloadSummaryCommand(home: Path, stateDir: Path): Pair<List<String>, Map<String, String>>? {
+        val script = home.resolve("effort-guard").resolve("effort-guard.mjs")
+        if (!Files.exists(script)) return null
+        return listOf("node", script.toString(), "payloads") to mapOf("EFFORT_GUARD_DIR" to stateDir.toString(), "COPILOT_HOME" to home.toString())
+    }
+
     const val CONFIG_FILE = ".effort-guard.json"
 
     /** Per-project thresholds read by the hooks; other keys of the file are kept. */
