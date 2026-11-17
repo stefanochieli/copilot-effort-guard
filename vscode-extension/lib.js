@@ -124,6 +124,40 @@ function hooksStatus(home, bundledSrc, folders = []) {
   return { installed: user || repo, user, repo, outdated }
 }
 
+// --- Payload capture (what the hooks write with EFFORT_GUARD_DEBUG=1) -----------------
+
+// A flag file next to the hooks: the hooks check it on every event, so switching the
+// capture on needs no restart of VS Code (an environment variable would).
+const CAPTURE_FLAG = 'debug-capture'
+
+function captureFlag(home) {
+  return path.join(home, 'effort-guard', CAPTURE_FLAG)
+}
+
+function captureOn(home) {
+  return fs.existsSync(captureFlag(home))
+}
+
+function setCapture(home, on) {
+  const file = captureFlag(home)
+  if (on) {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, 'Payload capture is on: delete this file (or use the extension button) to stop it.\n')
+  } else {
+    fs.rmSync(file, { force: true })
+  }
+  return on
+}
+
+// How to get the value-free summary of the captured payloads of one project: the hook
+// script itself (`effort-guard payloads`), from the installed copy or the bundled one.
+function payloadSummaryCommand(home, bundledSrc, stateDir) {
+  const installed = path.join(home, 'effort-guard', 'effort-guard.mjs')
+  const bundled = bundledSrc ? path.join(bundledSrc, 'effort-guard.mjs') : null
+  const script = fs.existsSync(installed) ? installed : bundled && fs.existsSync(bundled) ? bundled : null
+  return script ? { script, args: [script, 'payloads'], env: { EFFORT_GUARD_DIR: stateDir, COPILOT_HOME: home } } : null
+}
+
 // --- Per-project thresholds (.effort-guard.json, read by the hooks) ------------------
 
 const CONFIG_FILE = '.effort-guard.json'
@@ -604,8 +638,10 @@ ${sessions ? `<h4>Sessions in this folder</h4><ul>${sessions}</ul><div class="mu
 ${view.history?.some(d => d.turns) ? `<h4>Last ${view.history.length} days</h4>${historySvg(view.history)}<div class="muted">${esc(view.history[0].day)} \u2192 ${esc(view.history.at(-1).day)} \u00b7 red: struggling turns</div>` : ''}
 ${view.reasons?.length ? `<h4>Why it struggled</h4><ul>${view.reasons.map(r => `<li>${esc(r.reason)}: ${r.count}</li>`).join('')}</ul>` : ''}
 ${view.hooks && !view.hooks.installed ? `<div class="hint">The Copilot hooks are not installed, so there is nothing to show yet.<button data-msg="install">Install hooks</button></div>` : ''}
+${view.capture ? `<div class="hint">Payload capture is <b>on</b>: the hooks save every event (secrets masked) so the real field names can be checked. Switch it off when you are done.</div>` : ''}
 ${view.hooks?.outdated ? `<div class="hint">The installed hooks are older than this extension.<button data-msg="install">Update hooks</button></div>` : ''}
 <button id="reset" data-msg="reset" title="Use it after changing model or thinking effort">Reset after changing model / thinking</button>
+<div class="row"><button data-msg="capture" class="secondary" title="Saves the raw hook payloads (secrets masked) so the field names Copilot really sends can be checked">${view.capture ? 'Stop capturing payloads' : 'Capture payloads'}</button><button data-msg="payloads" class="secondary" title="Copies the shape of the captured payloads (field names and types, no values) to the clipboard">Copy payload summary</button></div>
 <div class="row"><button data-msg="thresholds" class="secondary">Thresholds (${view.threshold} / ${view.calmThreshold})\u2026</button><button data-msg="csv" class="secondary">Export CSV</button></div>
 <div class="meta muted">Session: ${session}<br>Folder: ${esc(view.cwd ?? '-')}<br>Last activity: ${esc(ageText(view.updated, now))}</div>
 <script nonce="${NONCE}">const vs = acquireVsCodeApi(); document.querySelectorAll('button[data-msg]').forEach(b => b.addEventListener('click', () => vs.postMessage({ type: b.dataset.msg })))</script>
@@ -644,4 +680,4 @@ function formatReport(projects, now = Date.now()) {
     .join('\n\n')
 }
 
-module.exports = { qualityOf, qualitySummary, voteLast, QUALITY_HEX, hooksStatus, readConfig, writeConfig, validateThreshold, dailyHistory, reasonCounts, toCsv, historySvg, CONFIG_FILE, readState, resetProject, sessionKind, copilotHome, readProjects, findState, computeView, byChannel, levelOf, textBar, renderHtml, shouldNotify, formatReport, isInside, LEVEL_THEME_COLOR, LEVEL_HEX }
+module.exports = { captureFlag, captureOn, setCapture, payloadSummaryCommand, qualityOf, qualitySummary, voteLast, QUALITY_HEX, hooksStatus, readConfig, writeConfig, validateThreshold, dailyHistory, reasonCounts, toCsv, historySvg, CONFIG_FILE, readState, resetProject, sessionKind, copilotHome, readProjects, findState, computeView, byChannel, levelOf, textBar, renderHtml, shouldNotify, formatReport, isInside, LEVEL_THEME_COLOR, LEVEL_HEX }

@@ -562,6 +562,22 @@ function withLock(path, fn) {
   }
 }
 
+// The IDE extensions switch the capture on and off with this file next to the hooks
+// (no need to restart VS Code with an environment variable). The variable still wins.
+export const CAPTURE_FLAG = 'debug-capture'
+
+function debugMode() {
+  const env = process.env.EFFORT_GUARD_DEBUG
+  if (env) {
+    return env
+  }
+  try {
+    return existsSync(join(homeDir(), CAPTURE_FLAG)) ? '1' : ''
+  } catch {
+    return ''
+  }
+}
+
 // EFFORT_GUARD_DEBUG=1 keeps every raw payload, so the real field names of a
 // Copilot version can be checked and the fixtures updated.
 // Folder shared by all working directories: holds events.log (one line per hook
@@ -596,7 +612,7 @@ function lastEvents(n) {
 // Payloads are redacted (tokens, passwords, Authorization headers) unless the
 // variable is exactly "raw", and the file is rotated so it cannot grow without limit.
 function debugDump(event, payload, input = {}) {
-  const mode = process.env.EFFORT_GUARD_DEBUG
+  const mode = debugMode()
   if (!mode) {
     return
   }
@@ -753,7 +769,7 @@ function payloads() {
   try {
     lines = readFileSync(join(stateDir(), 'payloads.jsonl'), 'utf8').trim().split('\n')
   } catch {
-    return console.log('effort-guard: no payloads.jsonl here. Start Copilot with EFFORT_GUARD_DEBUG=1 first.')
+    return console.log('effort-guard: no payloads.jsonl here. Switch the capture on (button "Capture payloads" in the extension, or EFFORT_GUARD_DEBUG=1) and use Copilot first.')
   }
   for (const g of summarisePayloads(lines)) {
     console.log(`${g.count}x ${g.event}${g.tool ? ` tool=${g.tool}` : ''} source=${g.source || '-'}\n   host env: ${g.hostEnv || '-'}\n   payload keys: ${g.keys}\n   tool args keys: ${g.argKeys || '-'}\n   result keys: ${g.resultKeys || '-'} resultType=${g.resultType || '-'} exitCode=${g.exitCode ?? '-'}${g.parseError ? `\n   STDIN ERROR: ${g.parseError}` : ''}`)
@@ -801,7 +817,7 @@ function doctor() {
       stateDir: dir,
       stateExists: existsSync(dir),
       threshold: thresholds(process.env, projectConfig(activeCwd)).threshold,
-      debug: Boolean(process.env.EFFORT_GUARD_DEBUG),
+      debug: Boolean(debugMode()),
       events: lastEvents(200),
       projects,
     }),

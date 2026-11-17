@@ -37,6 +37,7 @@ function refresh() {
     hooksCheckedAt = Date.now()
   }
   view.hooks = hooks
+  view.capture = lib.captureOn(home)
 
   item.text = view.text
   item.tooltip = view.tooltip
@@ -184,7 +185,51 @@ function vote(kind) {
   }
 }
 
-const PANEL_ACTIONS = { 'vote-up': () => vote('up'), 'vote-down': () => vote('down'), reset: () => resetEvaluation(), install: () => installHooks(), thresholds: () => setThresholds(), csv: () => exportCsv() }
+// Payload capture: the switch, and the summary to paste back (field names and types only).
+function toggleCapture() {
+  const { home } = settings()
+  try {
+    const on = lib.setCapture(home, !lib.captureOn(home))
+    lastHtml = ''
+    refresh()
+    vscode.window.showInformationMessage(
+      on
+        ? 'Effort Guard: payload capture is on. Use Copilot in Chat and in the CLI for a few prompts (with a tool each), then press "Copy payload summary". Switch it off afterwards.'
+        : 'Effort Guard: payload capture is off.',
+    )
+  } catch (err) {
+    vscode.window.showErrorMessage(`Effort Guard: could not change the capture (${err.message})`)
+  }
+}
+
+function copyPayloadSummary() {
+  if (!currentDir) {
+    vscode.window.showInformationMessage('Effort Guard: no data for this folder yet. Switch the capture on and use Copilot here first.')
+    return
+  }
+  const cmd = lib.payloadSummaryCommand(settings().home, path.join(BUNDLED, 'src'), currentDir)
+  if (!cmd) {
+    vscode.window.showErrorMessage('Effort Guard: no hook script found. Install the hooks first.')
+    return
+  }
+  execFile('node', cmd.args, { env: { ...process.env, ...cmd.env }, timeout: 30000, windowsHide: true }, async (err, stdout, stderr) => {
+    if (err) {
+      vscode.window.showErrorMessage(`Effort Guard: could not read the payloads (${(stderr || err.message).trim()})`)
+      return
+    }
+    const text = stdout.trim()
+    await vscode.env.clipboard.writeText(text)
+    const doc = await vscode.workspace.openTextDocument({ content: text, language: 'plaintext' })
+    await vscode.window.showTextDocument(doc, { preview: true })
+    vscode.window.showInformationMessage(
+      /no payloads\.jsonl/.test(text)
+        ? 'Effort Guard: nothing captured for this folder yet. Switch the capture on and use Copilot (Chat and CLI) first.'
+        : 'Effort Guard: payload summary copied to the clipboard (field names and types only, no values). Paste it in the chat.',
+    )
+  })
+}
+
+const PANEL_ACTIONS = { capture: () => toggleCapture(), payloads: () => copyPayloadSummary(), 'vote-up': () => vote('up'), 'vote-down': () => vote('down'), reset: () => resetEvaluation(), install: () => installHooks(), thresholds: () => setThresholds(), csv: () => exportCsv() }
 
 function activate(context) {
   extensionContext = context
@@ -209,6 +254,8 @@ function activate(context) {
       },
     }),
     vscode.commands.registerCommand('effortGuard.reset', resetEvaluation),
+    vscode.commands.registerCommand('effortGuard.toggleCapture', toggleCapture),
+    vscode.commands.registerCommand('effortGuard.copyPayloadSummary', copyPayloadSummary),
     vscode.commands.registerCommand('effortGuard.installHooks', installHooks),
     vscode.commands.registerCommand('effortGuard.setThresholds', setThresholds),
     vscode.commands.registerCommand('effortGuard.exportCsv', exportCsv),

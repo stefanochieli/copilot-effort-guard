@@ -3,6 +3,8 @@ package com.stefanochieli.effortguard.ui
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
@@ -11,6 +13,7 @@ import com.stefanochieli.effortguard.core.EffortCore
 import com.stefanochieli.effortguard.core.EffortState
 import com.stefanochieli.effortguard.core.EffortView
 import com.stefanochieli.effortguard.core.Notice
+import java.awt.datatransfer.StringSelection
 import java.nio.file.Path
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ScheduledFuture
@@ -24,6 +27,11 @@ import java.util.concurrent.TimeUnit
 class EffortMonitor(private val project: Project) : Disposable {
     @Volatile
     var view: EffortView = EffortCore.computeView(null)
+        private set
+
+    /** True while the hooks save every payload (flag file next to the hooks). */
+    @Volatile
+    var capture: Boolean = false
         private set
 
     @Volatile
@@ -54,6 +62,7 @@ class EffortMonitor(private val project: Project) : Disposable {
             val found = EffortCore.findState(EffortCore.readProjects(EffortCore.copilotHome(), folders), folders)
             val state = found?.state
             currentDir = found?.dir
+            capture = EffortCore.captureOn(EffortCore.copilotHome())
             view = EffortCore.computeView(state, found?.raw)
             // Compared with the previous state of the same folder only: the first look at a
             // project (IDE just opened) is not news.
@@ -79,6 +88,52 @@ class EffortMonitor(private val project: Project) : Disposable {
             show("Evaluation restarted.", NotificationType.INFORMATION)
         } catch (e: Exception) {
             show("Reset failed (${e.message}).", NotificationType.ERROR)
+        }
+    }
+
+    /** Switches the saving of raw hook payloads on or off (no restart needed). */
+    fun toggleCapture() {
+        try {
+            val on = EffortCore.setCapture(EffortCore.copilotHome(), !EffortCore.captureOn(EffortCore.copilotHome()))
+            refresh()
+            show(
+                if (on) "Payload capture is on. Use Copilot (Chat and CLI) for a few prompts with a tool each, then press Copy payload summary. Switch it off afterwards."
+                else "Payload capture is off.",
+                NotificationType.INFORMATION,
+            )
+        } catch (e: Exception) {
+            show("Could not change the capture (${e.message}).", NotificationType.ERROR)
+        }
+    }
+
+    /** Copies the shape of the captured payloads (field names and types, no values) to the clipboard. */
+    fun copyPayloadSummary() {
+        val dir = currentDir
+        if (dir == null) {
+            show("No data for this folder yet. Switch the capture on and use Copilot here first.", NotificationType.INFORMATION)
+            return
+        }
+        val cmd = EffortCore.payloadSummaryCommand(EffortCore.copilotHome(), dir)
+        if (cmd == null) {
+            show("No hook script found. Install the hooks first.", NotificationType.ERROR)
+            return
+        }
+        AppExecutorUtil.getAppExecutorService().execute {
+            try {
+                val process = ProcessBuilder(cmd.first).redirectErrorStream(true).apply { environment().putAll(cmd.second) }.start()
+                val text = process.inputStream.bufferedReader().readText().trim()
+                process.waitFor(30, TimeUnit.SECONDS)
+                ApplicationManager.getApplication().invokeLater {
+                    CopyPasteManager.getInstance().setContents(StringSelection(text))
+                    show(
+                        if (text.contains("no payloads.jsonl")) "Nothing captured for this folder yet. Switch the capture on and use Copilot (Chat and CLI) first."
+                        else "Payload summary copied to the clipboard (field names and types only, no values). Paste it in the chat.",
+                        NotificationType.INFORMATION,
+                    )
+                }
+            } catch (e: Exception) {
+                show("Could not read the payloads (${e.message}). Node.js 20 or later must be in the PATH.", NotificationType.ERROR)
+            }
         }
     }
 

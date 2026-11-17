@@ -233,4 +233,21 @@ class EffortCoreTest {
         assertFalse(reset.struggling)
         assertEquals(0, reset.lanes.single { it.kind == "cli" }.calm)
     }
+
+    @Test
+    fun captureFlagAndSummaryCommand() {
+        val home = Files.createTempDirectory("eg-cap")
+        val state = Files.createTempDirectory("eg-cap-state")
+        assertFalse(EffortCore.captureOn(home))
+        assertTrue(EffortCore.setCapture(home, true))
+        assertTrue(EffortCore.captureOn(home))
+        assertEquals("debug-capture", EffortCore.captureFlag(home).fileName.toString())
+        assertFalse(EffortCore.setCapture(home, false))
+        assertFalse(EffortCore.captureOn(home))
+        assertNull(EffortCore.payloadSummaryCommand(home, state), "no hook script installed")
+        Files.writeString(home.resolve("effort-guard").resolve("effort-guard.mjs"), "")
+        val (args, env) = EffortCore.payloadSummaryCommand(home, state)!!
+        assertEquals(listOf("node", home.resolve("effort-guard").resolve("effort-guard.mjs").toString(), "payloads"), args)
+        assertEquals(state.toString(), env["EFFORT_GUARD_DIR"])
+    }
 }

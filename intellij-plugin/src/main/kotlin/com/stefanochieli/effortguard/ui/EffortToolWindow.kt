@@ -178,6 +178,8 @@ class EffortPanel(project: Project) : JPanel(BorderLayout()), Disposable {
     private val metaArea = JTextArea()
     private val resetButton = JButton("Reset after changing model / thinking")
     private val thresholdsButton = JButton("Thresholds…")
+    private val captureButton = JButton("Capture payloads")
+    private val payloadsButton = JButton("Copy payload summary")
     private val qualityLabel = JBLabel()
     private val qualityDetail = JBLabel()
     private val voteUp = JButton("\uD83D\uDC4D Good result")
@@ -277,6 +279,14 @@ class EffortPanel(project: Project) : JPanel(BorderLayout()), Disposable {
         column.add(sessionsArea)
         column.add(resetButton)
         column.add(thresholdsButton)
+        captureButton.alignmentX = LEFT_ALIGNMENT
+        captureButton.toolTipText = "Saves the raw hook payloads (secrets masked) so the field names Copilot really sends can be checked."
+        captureButton.addActionListener { monitor.toggleCapture() }
+        payloadsButton.alignmentX = LEFT_ALIGNMENT
+        payloadsButton.toolTipText = "Copies the shape of the captured payloads (field names and types, no values) to the clipboard."
+        payloadsButton.addActionListener { monitor.copyPayloadSummary() }
+        column.add(captureButton)
+        column.add(payloadsButton)
         column.add(JPanel().apply { isOpaque = false; preferredSize = Dimension(0, JBUI.scale(8)); maximumSize = preferredSize })
         column.add(metaArea)
         add(column, BorderLayout.NORTH)
@@ -346,6 +356,7 @@ class EffortPanel(project: Project) : JPanel(BorderLayout()), Disposable {
         reasonsArea.isVisible = view.reasons.isNotEmpty()
         reasonsArea.text = "Why it struggled: " + view.reasons.joinToString(", ") { "${it.first} ${it.second}" }
         thresholdsButton.text = "Thresholds (${view.threshold} / ${view.calmThreshold})…"
+        captureButton.text = if (monitor.capture) "Stop capturing payloads" else "Capture payloads"
         val sessions = view.sessions.mapIndexed { i, s ->
             "${s.kind ?: s.source} / ${s.id}${if (i == 0) " (latest)" else ""}  ${EffortCore.ageText(s.last)}"
         }

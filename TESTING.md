@@ -15,6 +15,10 @@ Per un repository (condiviso col team via git): `node scripts/install.mjs <carte
 
 ## 3. Verifica con il dump dei payload
 
+**Dalle estensioni (VS Code e IntelliJ), senza riavviare nulla:** nel pannello *Effort Guard* premi **Capture payloads**, usa Copilot (Chat e CLI, qualche prompt che usi un tool), poi **Copy payload summary**: copia negli appunti solo la forma dei payload (nomi di campi e tipi, nessun valore) e la apre in un documento. Incollala dove serve e premi *Stop capturing payloads*. Il pulsante crea il file `~/.copilot/effort-guard/debug-capture`, che gli hook controllano a ogni evento (vale per l'installazione per utente).
+
+Oppure a mano:
+
 1. Avvia Copilot con `EFFORT_GUARD_DEBUG=1` (PowerShell: `$env:EFFORT_GUARD_DEBUG=1`) e `EFFORT_GUARD_THRESHOLD=1`.
 2. Chiedi all'agente di eseguire un comando di test che fallisce (es. `npm test` su un test rotto) e poi mandagli un altro messaggio.
 3. `node <percorso>/effort-guard.mjs doctor` mostra il riepilogo; `.effort-guard/payloads.jsonl` contiene i payload grezzi di ogni evento.
