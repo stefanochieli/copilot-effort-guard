@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.13.0](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.12.1...v0.13.0) (2026-11-17)
+
+
+### Features
+
+* capture and copy the hook payload summary from the VS Code and IntelliJ panels ([#68](https://github.com/stefanochieli/copilot-effort-guard/issues/68)) ([68a0790](https://github.com/stefanochieli/copilot-effort-guard/commit/68a0790029e97809c41eac033ce0d4bf88ade47b))
+
+
+### Bug Fixes
+
+* review fixes for hooks and IDE extensions, per-channel history ([#67](https://github.com/stefanochieli/copilot-effort-guard/issues/67)) ([c1eb6c3](https://github.com/stefanochieli/copilot-effort-guard/commit/c1eb6c309326bb12978d88901b124814b64cbc00))
+
 ## [0.12.1](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.12.0...v0.12.1) (2026-11-13)
 
 
