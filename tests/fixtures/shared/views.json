@@ -226,6 +226,300 @@
         "threshold": 3
       },
       "notice": null
+    },
+    {
+      "name": "lanes: the CLI acted last, Chat already warned",
+      "prev": {
+        "streak": 3,
+        "calm": 0,
+        "threshold": 3,
+        "calmThreshold": 8,
+        "turn": {},
+        "log": [],
+        "lanes": {
+          "chat": {
+            "streak": 3,
+            "calm": 0,
+            "turn": {}
+          },
+          "cli": {
+            "streak": 0,
+            "calm": 0,
+            "turn": {}
+          }
+        }
+      },
+      "cur": {
+        "streak": 0,
+        "calm": 0,
+        "threshold": 3,
+        "calmThreshold": 8,
+        "turn": {},
+        "log": [],
+        "lanes": {
+          "chat": {
+            "streak": 3,
+            "calm": 0,
+            "turn": {}
+          },
+          "cli": {
+            "streak": 0,
+            "calm": 0,
+            "turn": {}
+          }
+        }
+      },
+      "notice": null
+    },
+    {
+      "name": "lanes: Chat acts again, nothing crossed",
+      "prev": {
+        "streak": 0,
+        "calm": 0,
+        "threshold": 3,
+        "calmThreshold": 8,
+        "turn": {},
+        "log": [],
+        "lanes": {
+          "chat": {
+            "streak": 3,
+            "calm": 0,
+            "turn": {}
+          },
+          "cli": {
+            "streak": 0,
+            "calm": 0,
+            "turn": {}
+          }
+        }
+      },
+      "cur": {
+        "streak": 3,
+        "calm": 0,
+        "threshold": 3,
+        "calmThreshold": 8,
+        "turn": {},
+        "log": [],
+        "lanes": {
+          "chat": {
+            "streak": 3,
+            "calm": 0,
+            "turn": {}
+          },
+          "cli": {
+            "streak": 0,
+            "calm": 0,
+            "turn": {}
+          }
+        }
+      },
+      "notice": null
+    },
+    {
+      "name": "lanes: the CLI reaches the threshold",
+      "prev": {
+        "streak": 3,
+        "calm": 0,
+        "threshold": 3,
+        "calmThreshold": 8,
+        "turn": {},
+        "log": [],
+        "lanes": {
+          "chat": {
+            "streak": 3,
+            "calm": 0,
+            "turn": {}
+          },
+          "cli": {
+            "streak": 2,
+            "calm": 0,
+            "turn": {}
+          }
+        }
+      },
+      "cur": {
+        "streak": 3,
+        "calm": 0,
+        "threshold": 3,
+        "calmThreshold": 8,
+        "turn": {},
+        "log": [],
+        "lanes": {
+          "chat": {
+            "streak": 3,
+            "calm": 0,
+            "turn": {}
+          },
+          "cli": {
+            "streak": 3,
+            "calm": 0,
+            "turn": {}
+          }
+        }
+      },
+      "notice": "warn"
+    },
+    {
+      "name": "lanes: Chat reaches twice the threshold",
+      "prev": {
+        "streak": 0,
+        "calm": 0,
+        "threshold": 3,
+        "calmThreshold": 8,
+        "turn": {},
+        "log": [],
+        "lanes": {
+          "chat": {
+            "streak": 5,
+            "calm": 0,
+            "turn": {}
+          },
+          "cli": {
+            "streak": 0,
+            "calm": 0,
+            "turn": {}
+          }
+        }
+      },
+      "cur": {
+        "streak": 6,
+        "calm": 0,
+        "threshold": 3,
+        "calmThreshold": 8,
+        "turn": {},
+        "log": [],
+        "lanes": {
+          "chat": {
+            "streak": 6,
+            "calm": 0,
+            "turn": {}
+          },
+          "cli": {
+            "streak": 0,
+            "calm": 0,
+            "turn": {}
+          }
+        }
+      },
+      "notice": "escalate"
+    },
+    {
+      "name": "lanes: calm lanes taking turns",
+      "prev": {
+        "streak": 0,
+        "calm": 8,
+        "threshold": 3,
+        "calmThreshold": 8,
+        "turn": {},
+        "log": [],
+        "lanes": {
+          "chat": {
+            "streak": 0,
+            "calm": 8,
+            "turn": {}
+          },
+          "cli": {
+            "streak": 0,
+            "calm": 2,
+            "turn": {}
+          }
+        }
+      },
+      "cur": {
+        "streak": 0,
+        "calm": 3,
+        "threshold": 3,
+        "calmThreshold": 8,
+        "turn": {},
+        "log": [],
+        "lanes": {
+          "chat": {
+            "streak": 0,
+            "calm": 8,
+            "turn": {}
+          },
+          "cli": {
+            "streak": 0,
+            "calm": 3,
+            "turn": {}
+          }
+        }
+      },
+      "notice": null
+    },
+    {
+      "name": "lanes: the CLI reaches the calm threshold",
+      "prev": {
+        "streak": 0,
+        "calm": 9,
+        "threshold": 3,
+        "calmThreshold": 8,
+        "turn": {},
+        "log": [],
+        "lanes": {
+          "chat": {
+            "streak": 0,
+            "calm": 9,
+            "turn": {}
+          },
+          "cli": {
+            "streak": 0,
+            "calm": 7,
+            "turn": {}
+          }
+        }
+      },
+      "cur": {
+        "streak": 0,
+        "calm": 8,
+        "threshold": 3,
+        "calmThreshold": 8,
+        "turn": {},
+        "log": [],
+        "lanes": {
+          "chat": {
+            "streak": 0,
+            "calm": 9,
+            "turn": {}
+          },
+          "cli": {
+            "streak": 0,
+            "calm": 8,
+            "turn": {}
+          }
+        }
+      },
+      "notice": "calm"
+    },
+    {
+      "name": "lanes: first state with lanes after an old one",
+      "prev": {
+        "streak": 3,
+        "threshold": 3,
+        "turn": {},
+        "log": []
+      },
+      "cur": {
+        "streak": 3,
+        "calm": 0,
+        "threshold": 3,
+        "calmThreshold": 8,
+        "turn": {},
+        "log": [],
+        "lanes": {
+          "chat": {
+            "streak": 3,
+            "calm": 0,
+            "turn": {}
+          },
+          "cli": {
+            "streak": 0,
+            "calm": 0,
+            "turn": {}
+          }
+        }
+      },
+      "notice": null
     }
   ],
   "history": [

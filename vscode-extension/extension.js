@@ -14,6 +14,7 @@ let hooksCheckedAt = 0
 let item
 let timer
 let previous = null
+let previousDir = null
 let panel = null
 let lastHtml = ''
 let currentDir = null
@@ -52,13 +53,17 @@ function refresh() {
     }
   }
 
-  const kind = notify ? lib.shouldNotify(previous, state, threshold) : null
+  // Compared with the previous state of the same project only: when the view moves to
+  // another folder its numbers are not a change, and the first look at a project
+  // (window just opened) is not news either.
+  const kind = notify && previous && previousDir === currentDir ? lib.shouldNotify(previous, state, threshold) : null
   if (kind === 'warn' || kind === 'escalate') {
     vscode.window.showWarningMessage(`Effort Guard: ${view.messages[kind]}`)
   } else if (kind === 'calm') {
     vscode.window.showInformationMessage(`Effort Guard: ${view.messages.calm}`)
   }
   previous = state
+  previousDir = currentDir
 }
 
 function resetEvaluation() {
@@ -68,7 +73,6 @@ function resetEvaluation() {
   }
   try {
     lib.resetProject(currentDir)
-    previous = null
     refresh()
     vscode.window.showInformationMessage('Effort Guard: evaluation restarted.')
   } catch (err) {
@@ -196,7 +200,7 @@ function activate(context) {
       resolveWebviewView(view) {
         panel = view
         view.webview.options = { enableScripts: true }
-        view.webview.onDidReceiveMessage(m => PANEL_ACTIONS[m?.type]?.())
+        view.webview.onDidReceiveMessage(m => Object.hasOwn(PANEL_ACTIONS, m?.type) && PANEL_ACTIONS[m.type]())
         lastHtml = ''
         view.onDidDispose(() => {
           panel = null

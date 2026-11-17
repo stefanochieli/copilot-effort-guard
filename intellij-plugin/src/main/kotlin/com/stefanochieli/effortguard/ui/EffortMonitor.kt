@@ -29,6 +29,7 @@ class EffortMonitor(private val project: Project) : Disposable {
     @Volatile
     private var currentDir: Path? = null
     private var previous: EffortState? = null
+    private var previousDir: Path? = null
     private var task: ScheduledFuture<*>? = null
     private val listeners = CopyOnWriteArrayList<Runnable>()
 
@@ -54,8 +55,11 @@ class EffortMonitor(private val project: Project) : Disposable {
             val state = found?.state
             currentDir = found?.dir
             view = EffortCore.computeView(state, found?.raw)
-            notify(EffortCore.shouldNotify(previous, state))
+            // Compared with the previous state of the same folder only: the first look at a
+            // project (IDE just opened) is not news.
+            if (previous != null && previousDir == found?.dir) notify(EffortCore.shouldNotify(previous, state))
             previous = state
+            previousDir = found?.dir
             listeners.forEach { it.run() }
         } catch (e: Exception) {
             thisLogger().warn("Effort Guard refresh failed", e)
@@ -71,7 +75,6 @@ class EffortMonitor(private val project: Project) : Disposable {
         }
         try {
             EffortCore.resetProject(dir)
-            previous = null
             refresh()
             show("Evaluation restarted.", NotificationType.INFORMATION)
         } catch (e: Exception) {

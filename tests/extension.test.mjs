@@ -280,3 +280,63 @@ test('reset from the extension clears both lanes', () => {
   assert.equal(next.lanes.cli.streak, 0)
   assert.equal(next.lanes.chat.turn.struggled, false)
 })
+
+// --- Review of 2026-11-16 ------------------------------------------------------------
+
+test('hooksStatus: a change in any bundled module is outdated, CRLF copies are not', () => {
+  const home = mkdtempSync(join(tmpdir(), 'eg-hs2-'))
+  const bundled = mkdtempSync(join(tmpdir(), 'eg-bundle2-'))
+  mkdirSync(join(home, 'hooks'))
+  writeFileSync(join(home, 'hooks', 'effort-guard.json'), '{}')
+  mkdirSync(join(home, 'effort-guard'))
+  for (const dir of [bundled, join(home, 'effort-guard')]) {
+    writeFileSync(join(dir, 'effort-guard.mjs'), 'a\nb\n')
+    writeFileSync(join(dir, 'detect.mjs'), 'one\n')
+  }
+  assert.equal(lib.hooksStatus(home, bundled).outdated, false)
+  writeFileSync(join(home, 'effort-guard', 'effort-guard.mjs'), 'a\r\nb\r\n')
+  assert.equal(lib.hooksStatus(home, bundled).outdated, false, 'line endings only')
+  writeFileSync(join(bundled, 'detect.mjs'), 'two\n')
+  assert.equal(lib.hooksStatus(home, bundled).outdated, true, 'detect.mjs changed')
+  writeFileSync(join(bundled, 'detect.mjs'), 'one\n')
+  writeFileSync(join(bundled, 'new.mjs'), 'x\n')
+  assert.equal(lib.hooksStatus(home, bundled).outdated, true, 'a module the installed copy does not have')
+})
+
+test('shouldNotify: Chat and CLI taking turns do not repeat the warning', () => {
+  const st = (top, chat, cli) => ({ streak: top, threshold: 3, lanes: { chat: { streak: chat }, cli: { streak: cli } } })
+  const seq = [st(3, 3, 0), st(0, 3, 0), st(3, 3, 0), st(0, 3, 0), st(1, 3, 1)]
+  assert.deepEqual(seq.slice(1).map((c, i) => lib.shouldNotify(seq[i], c)), [null, null, null, null])
+  assert.equal(lib.shouldNotify(st(1, 3, 2), st(3, 3, 3)), 'warn')
+})
+
+test('resetProject and voteLast read a state file that starts with a BOM', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'eg-bom-'))
+  writeFileSync(join(dir, 'state.json'), '﻿' + JSON.stringify({ streak: 2, turn: {}, log: [{ ts: 'x', struggled: true }] }))
+  assert.equal(lib.voteLast(dir, 'up'), 'up')
+  assert.equal(lib.resetProject(dir).streak, 0)
+  assert.equal(readdirSync(dir).some(f => f.endsWith('.tmp') || f.endsWith('.lock')), false)
+})
+
+test('byChannel splits the log into Chat, CLI and turns from before the split', () => {
+  const log = [
+    { ts: '2026-11-10T10:00:00Z', struggled: true, reason: 'tool_error' },
+    { ts: '2026-11-16T10:00:00Z', struggled: false, kind: 'cli', tests: 'green' },
+    { ts: '2026-11-16T10:05:00Z', struggled: true, reason: 'exit_code', kind: 'cli' },
+    { ts: '2026-11-16T10:10:00Z', struggled: false, kind: 'chat' },
+  ]
+  const by = Object.fromEntries(lib.byChannel(log).map(c => [c.kind, c]))
+  assert.deepEqual([by.chat.turns, by.cli.turns, by.unknown.turns], [1, 2, 1])
+  assert.equal(by.cli.rate, 50)
+  assert.equal(by.chat.rate, 0)
+  assert.equal(by.cli.reasons[0].reason, 'exit_code')
+  assert.equal(lib.computeView({ streak: 0, turn: {}, log }).channels.length, 3)
+})
+
+test('the panel shows a channel table, and says so when Chat has no turns at all', () => {
+  const only = lib.renderHtml(lib.computeView({ streak: 0, turn: {}, log: [{ ts: '2026-11-16T10:00:00Z', struggled: false, kind: 'cli' }] }))
+  assert.match(only, /By channel/)
+  assert.match(only, /No Chat turn recorded/)
+  const both = lib.renderHtml(lib.computeView({ streak: 0, turn: {}, log: [{ ts: '2026-11-16T10:00:00Z', struggled: false, kind: 'cli' }, { ts: '2026-11-16T10:01:00Z', struggled: true, kind: 'chat', reason: 'tool_error' }] }))
+  assert.doesNotMatch(both, /No Chat turn recorded/)
+})

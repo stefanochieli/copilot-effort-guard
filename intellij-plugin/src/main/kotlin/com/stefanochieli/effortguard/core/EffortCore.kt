@@ -354,14 +354,29 @@ object EffortCore {
     }
 
     /** Which notification to show, if any: when the streak crosses the threshold, twice the threshold, or the calm threshold. */
+    /**
+     * With Chat and CLI lanes each lane is compared with its own previous value (same as lib.js):
+     * the main view follows one lane or the other, so its streak jumps between the two and would
+     * raise the same notification again at every switch.
+     */
     fun shouldNotify(prev: EffortState?, cur: EffortState?, fallbackThreshold: Int = DEFAULT_THRESHOLD): Notice? {
         if (cur == null) return null
         val threshold = cur.threshold ?: fallbackThreshold
-        val prevStreak = prev?.streak ?: 0
-        if (cur.streak >= threshold * 2 && prevStreak < threshold * 2) return Notice.ESCALATE
-        if (cur.streak >= threshold && prevStreak < threshold) return Notice.WARN
         val calmThreshold = cur.calmThreshold ?: DEFAULT_CALM
-        if (cur.calm >= calmThreshold && (prev?.calm ?: 0) < calmThreshold) return Notice.CALM
+        // (previous streak, streak, previous calm, calm) of each lane, or of the whole state without lanes.
+        val pairs: List<IntArray> = if (cur.lanes.isEmpty()) {
+            listOf(intArrayOf(prev?.streak ?: 0, cur.streak, prev?.calm ?: 0, cur.calm))
+        } else {
+            cur.lanes.map { lane ->
+                val before = prev?.lanes?.firstOrNull { it.kind == lane.kind }
+                // A lane seen for the first time is compared with the state before lanes existed.
+                val old = prev != null && prev.lanes.isEmpty()
+                intArrayOf(before?.streak ?: if (old) prev!!.streak else 0, lane.streak, before?.calm ?: if (old) prev!!.calm else 0, lane.calm)
+            }
+        }
+        if (pairs.any { it[1] >= threshold * 2 && it[0] < threshold * 2 }) return Notice.ESCALATE
+        if (pairs.any { it[1] >= threshold && it[0] < threshold }) return Notice.WARN
+        if (pairs.any { it[3] >= calmThreshold && it[2] < calmThreshold }) return Notice.CALM
         return null
     }
 
@@ -477,7 +492,7 @@ object EffortCore {
     /** Per-project thresholds read by the hooks; other keys of the file are kept. */
     fun writeConfig(folder: Path, threshold: Int, calmThreshold: Int): Path {
         val file = folder.resolve(CONFIG_FILE)
-        val current = try { Json.parseObject(Files.readString(file)) } catch (_: Exception) { emptyMap() }
+        val current = try { Json.parseObject(Files.readString(file).removePrefix("\uFEFF")) } catch (_: Exception) { emptyMap() }
         val next = LinkedHashMap(current)
         next["threshold"] = threshold
         next["calmThreshold"] = calmThreshold
@@ -486,7 +501,7 @@ object EffortCore {
     }
 
     fun readConfig(folder: Path): Map<String, Any?> =
-        try { Json.parseObject(Files.readString(folder.resolve(CONFIG_FILE))) } catch (_: Exception) { emptyMap() }
+        try { Json.parseObject(Files.readString(folder.resolve(CONFIG_FILE)).removePrefix("\uFEFF")) } catch (_: Exception) { emptyMap() }
 
     fun ageText(iso: String?, now: Instant = Instant.now()): String {
         if (iso == null) return "-"
