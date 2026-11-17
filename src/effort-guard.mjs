@@ -10,7 +10,7 @@
 // Observation only: it never denies a tool call. Payload field names are read
 // defensively because Copilot delivers camelCase or snake_case depending on the
 // event key casing and version.
-import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, readdirSync, statSync, renameSync, rmdirSync, rmSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, readdirSync, statSync, renameSync, rmdirSync, rmSync, realpathSync } from 'node:fs'
 import { dirname, join, relative, isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
@@ -44,7 +44,13 @@ export function readTool(payload) {
   const input = pick(payload, 'toolArgs', 'tool_input', 'toolInput') ?? {}
   const parsed = typeof input === 'string' ? safeJson(input) : input
   const result = pick(payload, 'toolResult', 'tool_response', 'toolResponse', 'tool_result') ?? {}
-  const text = typeof result === 'string' ? result : pick(result, 'textResultForLlm', 'text', 'stdout', 'output') ?? ''
+  let text = typeof result === 'string' ? result : pick(result, 'textResultForLlm', 'text', 'stdout', 'output') ?? ''
+  // postToolUseFailure and errorOccurred carry no result: the message is in `error`
+  // (a string, or { message }). Without it the benign-error rules never see the text.
+  if (text === '') {
+    const error = pick(payload, 'error')
+    text = typeof error === 'string' ? error : pick(error, 'message') ?? ''
+  }
 
   // Copilot CLI reports { resultType: 'success' | 'failure' | 'denied', textResultForLlm }.
   const resultType = typeof result === 'object' ? pick(result, 'resultType', 'result_type') : undefined
@@ -77,8 +83,16 @@ export function hostEnv(env = process.env) {
   return HOST_ENV.filter(k => env[k] !== undefined && env[k] !== '')
 }
 
+// Tool names only the VS Code agent has (the 2026-11-02 capture on a corporate account
+// showed read_file and grep_search; the CLI calls its tools bash, powershell, view, edit,
+// grep, glob). A strong signal even when the payload is in the CLI format and the process
+// environment says nothing. Not confirmed on more captures: `effort-guard payloads` lists
+// the names that arrive.
+const CHAT_TOOL = /^(run_in_terminal|read_file|grep_search|file_search|list_dir|semantic_search|replace_string_in_file|multi_replace_string_in_file|insert_edit_into_file|create_file|create_directory|get_errors|runTests|run_vs_code_task|fetch_webpage|vscode_|copilot_|mcp_)/
+
 export function sessionSource(payload, env = process.env) {
-  const chatPayload = CHAT_KEYS.some(k => pick(payload, k) !== undefined)
+  const chatTool = CHAT_TOOL.test(String(pick(payload, 'toolName', 'tool_name') ?? ''))
+  const chatPayload = chatTool || CHAT_KEYS.some(k => pick(payload, k) !== undefined)
   const inTerminal = Boolean(env.TERM_PROGRAM || env.WT_SESSION || env.TERM_SESSION_ID)
   const extensionHost = env.VSCODE_CRASH_REPORTER_PROCESS_TYPE === 'extensionHost' || (Boolean(env.ELECTRON_RUN_AS_NODE) && !inTerminal)
   if (chatPayload || extensionHost) {
@@ -293,7 +307,8 @@ export function closeTurn(state, threshold, now = new Date(), calmThreshold = DE
 
   // A turn whose last test/build run is green ended well: whatever failed on the way
   // (a missing file, a refused command) was not a struggle.
-  const green = state.turn.tests === 'green'
+  // EFFORT_GUARD_RED_GREEN=0 turns this off too.
+  const green = state.turn.tests === 'green' && process.env.EFFORT_GUARD_RED_GREEN !== '0'
   const struggled = Boolean(state.turn.struggled) && !green
   const reason = struggled ? state.turn.reason : null
   const command = struggled ? state.turn.command : null
@@ -332,6 +347,7 @@ export function closeTurn(state, threshold, now = new Date(), calmThreshold = DE
     },
     warning,
     notice,
+    logged: true,
   }
 }
 
@@ -403,11 +419,34 @@ function normaliseCwd(cwd) {
   return process.platform === 'win32' ? s.replace(/\\/g, '/').toLowerCase() : s
 }
 
-function isUnder(file, dir) {
+function realPath(p) {
+  try {
+    return realpathSync(p)
+  } catch {
+    return resolve(String(p))
+  }
+}
+
+function under(file, dir) {
   const a = process.platform === 'win32' ? file.toLowerCase() : file
   const b = process.platform === 'win32' ? dir.toLowerCase() : dir
   const rel = relative(b, a)
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+}
+
+// Also true through a link: a home folder that is a junction or a symlink (redirected
+// profile, subst drive) must not send the per-user state into the projects.
+function isUnder(file, dir) {
+  return under(file, dir) || under(realPath(file), realPath(dir))
+}
+
+// Is `a` the same file as `b`? Windows spells one path in several ways (drive letter
+// case, junctions), and a plain string comparison would make the hook a silent no-op.
+export function sameFile(a, b) {
+  if (!a || !b) return false
+  const x = realPath(a)
+  const y = realPath(b)
+  return process.platform === 'win32' ? x.toLowerCase() === y.toLowerCase() : x === y
 }
 
 // Working directory of the session: the payload's `cwd` when it is a real folder,
@@ -453,7 +492,9 @@ export function validState(v) {
 
 // Unreadable or wrongly shaped files are moved to state.json.bad (one backup) and
 // the evaluation starts again, instead of failing on every hook call.
-function load(path) {
+// `repair: false` (read-only commands: doctor, status, watch, summary) never moves the
+// file: they read without the lock and may catch a write in progress.
+function load(path, { repair = true } = {}) {
   let raw
   try {
     raw = readFileSync(path, 'utf8')
@@ -466,9 +507,11 @@ function load(path) {
       return { ...emptyState(), ...parsed }
     }
   } catch {}
-  try {
-    renameSync(path, `${path}.bad`)
-  } catch {}
+  if (repair) {
+    try {
+      renameSync(path, `${path}.bad`)
+    } catch {}
+  }
   return emptyState()
 }
 
@@ -519,6 +562,22 @@ function withLock(path, fn) {
   }
 }
 
+// The IDE extensions switch the capture on and off with this file next to the hooks
+// (no need to restart VS Code with an environment variable). The variable still wins.
+export const CAPTURE_FLAG = 'debug-capture'
+
+function debugMode() {
+  const env = process.env.EFFORT_GUARD_DEBUG
+  if (env) {
+    return env
+  }
+  try {
+    return existsSync(join(homeDir(), CAPTURE_FLAG)) ? '1' : ''
+  } catch {
+    return ''
+  }
+}
+
 // EFFORT_GUARD_DEBUG=1 keeps every raw payload, so the real field names of a
 // Copilot version can be checked and the fixtures updated.
 // Folder shared by all working directories: holds events.log (one line per hook
@@ -553,7 +612,7 @@ function lastEvents(n) {
 // Payloads are redacted (tokens, passwords, Authorization headers) unless the
 // variable is exactly "raw", and the file is rotated so it cannot grow without limit.
 function debugDump(event, payload, input = {}) {
-  const mode = process.env.EFFORT_GUARD_DEBUG
+  const mode = debugMode()
   if (!mode) {
     return
   }
@@ -610,7 +669,8 @@ export function run(event, payload, state, threshold, now = new Date(), calmThre
     }
     const closed = closeTurn(state, threshold, now, calmThreshold)
     let next = key ? { ...closed.state, lastPromptKey: key } : closed.state
-    if (next.log.length > state.log.length) {
+    // Not `log.length` grew: a full log (LOG_LIMIT) keeps its length when a turn is added.
+    if (closed.logged) {
       // Who ran the turn: the lane, the session and (when the host says) the agent.
       const agent = agentOf(payload)
       const tags = { ...(lane ? { kind: lane } : {}), ...(session?.id && session.id !== '-' ? { session: session.id } : {}), ...(agent ? { agent } : {}), ...(state.episode ? { episode: state.episode } : {}) }
@@ -619,7 +679,7 @@ export function run(event, payload, state, threshold, now = new Date(), calmThre
     if (state.sessionId) next = { ...next, sessionId: state.sessionId }
     // A prompt asking to fix or redo marks the turn it reacts to: the last one closed
     // in the same lane (Chat and CLI turns interleave in the shared log).
-    if (looksLikeRework(pick(payload, 'prompt', 'user_prompt', 'userPrompt'))) {
+    if (closed.logged && looksLikeRework(pick(payload, 'prompt', 'user_prompt', 'userPrompt'))) {
       const i = next.log.findLastIndex(e => !lane || !e.kind || e.kind === lane)
       if (i >= 0) {
         const log = [...next.log]
@@ -709,7 +769,7 @@ function payloads() {
   try {
     lines = readFileSync(join(stateDir(), 'payloads.jsonl'), 'utf8').trim().split('\n')
   } catch {
-    return console.log('effort-guard: no payloads.jsonl here. Start Copilot with EFFORT_GUARD_DEBUG=1 first.')
+    return console.log('effort-guard: no payloads.jsonl here. Switch the capture on (button "Capture payloads" in the extension, or EFFORT_GUARD_DEBUG=1) and use Copilot first.')
   }
   for (const g of summarisePayloads(lines)) {
     console.log(`${g.count}x ${g.event}${g.tool ? ` tool=${g.tool}` : ''} source=${g.source || '-'}\n   host env: ${g.hostEnv || '-'}\n   payload keys: ${g.keys}\n   tool args keys: ${g.argKeys || '-'}\n   result keys: ${g.resultKeys || '-'} resultType=${g.resultType || '-'} exitCode=${g.exitCode ?? '-'}${g.parseError ? `\n   STDIN ERROR: ${g.parseError}` : ''}`)
@@ -719,7 +779,7 @@ function payloads() {
 function projectStates() {
   const root = join(homeDir(), 'state')
   try {
-    return readdirSync(root).map(d => ({ dir: join(root, d), state: load(join(root, d, 'state.json')) }))
+    return readdirSync(root).map(d => ({ dir: join(root, d), state: load(join(root, d, 'state.json'), { repair: false }) }))
   } catch {
     return []
   }
@@ -729,7 +789,7 @@ function doctor() {
   const dir = stateDir()
   const hooksFile = join(copilotHome(), 'hooks', 'effort-guard.json')
   const found = projectStates()
-  const own = existsSync(statePath()) ? [{ dir, state: load(statePath()) }] : []
+  const own = existsSync(statePath()) ? [{ dir, state: load(statePath(), { repair: false }) }] : []
   const projects = (found.length ? found : own).map(p => {
     const log = p.state.log ?? []
     const struggled = log.filter(e => e.struggled)
@@ -757,7 +817,7 @@ function doctor() {
       stateDir: dir,
       stateExists: existsSync(dir),
       threshold: thresholds(process.env, projectConfig(activeCwd)).threshold,
-      debug: Boolean(process.env.EFFORT_GUARD_DEBUG),
+      debug: Boolean(debugMode()),
       events: lastEvents(200),
       projects,
     }),
@@ -777,7 +837,7 @@ function barInfo(s) {
 const useColor = () => Boolean(process.stdout.isTTY) && !process.env.NO_COLOR
 
 function status() {
-  const s = load(statePath())
+  const s = load(statePath(), { repair: false })
   console.log(renderBar(barInfo(s), { color: useColor() }))
   console.log(`${summary(s)} | current turn ${s.turn.struggled ? `struggling (${s.turn.reason})` : 'ok'}`)
 }
@@ -787,7 +847,8 @@ function reset() {
   if (!existsSync(path)) {
     return console.log('effort-guard: nothing to reset in this folder yet.')
   }
-  save(path, resetState(load(path)))
+  // Same lock as the hooks: a reset must not overwrite an event written meanwhile.
+  withLock(path, () => save(path, resetState(load(path))))
   appendFileSync(join(homeDir(), 'events.log'), `${new Date().toISOString()} RESET cwd=${activeCwd}\n`)
   console.log('effort-guard: streaks reset, the evaluation starts again.')
 }
@@ -799,7 +860,7 @@ function watch() {
   let lastBar = null
   console.log('effort-guard watch (Ctrl+C to stop)')
   setInterval(() => {
-    const bar = renderBar(barInfo(load(statePath())), { color: useColor() })
+    const bar = renderBar(barInfo(load(statePath(), { repair: false })), { color: useColor() })
     if (bar !== lastBar) {
       console.log(bar)
       lastBar = bar
@@ -835,7 +896,7 @@ function main() {
     return payloads()
   }
   if (arg === 'summary') {
-    return console.log(summary(load(statePath())))
+    return console.log(summary(load(statePath(), { repair: false })))
   }
 
   const input = readStdin()
@@ -857,6 +918,11 @@ function main() {
   withLock(path, () => {
     const before = load(path)
     const session = readSession(payload)
+    // A session that already showed itself as Chat stays Chat: its prompt events carry no
+    // tool name, so on their own they would look like the CLI and split one conversation
+    // over two lanes.
+    const known = session.id === '-' ? null : (before.sessions ?? []).find(x => x.id === session.id)
+    if (known?.source === 'vscode-chat') session.source = 'vscode-chat'
     const lane = laneOf(session.source)
     const now = new Date()
     // The pause is measured on prompts only: a long build inside a turn is not a pause.
@@ -891,7 +957,7 @@ function main() {
   })
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (sameFile(process.argv[1], fileURLToPath(import.meta.url))) {
   try {
     main()
   } catch (err) {

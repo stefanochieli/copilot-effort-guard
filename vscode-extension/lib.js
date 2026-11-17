@@ -3,6 +3,7 @@
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
+const crypto = require('node:crypto')
 
 function copilotHome(setting, env = process.env) {
   return setting || env.COPILOT_HOME || path.join(os.homedir(), '.copilot')
@@ -74,22 +75,25 @@ function findState(projects, folders) {
 // Starts the evaluation again for one project folder (same effect as `effort-guard reset`).
 function resetProject(dir, now = new Date()) {
   const file = path.join(dir, 'state.json')
-  const state = JSON.parse(fs.readFileSync(file, 'utf8'))
-  const next = {
-    ...state,
-    turn: { struggled: false, reason: null, command: null },
-    streak: 0,
-    calm: 0,
-    pendingWarning: null,
-    started: true,
-    resetAt: now.toISOString(),
-  }
-  if (state.lanes && typeof state.lanes === 'object') {
-    next.lanes = Object.fromEntries(Object.entries(state.lanes).map(([k, v]) => [k, { ...v, turn: { struggled: false, reason: null, command: null }, streak: 0, calm: 0, pendingWarning: null, started: true }]))
-  }
-  // Temporary file + rename: the hooks never read a half-written state.
-  withStateLock(file, () => writeStateAtomic(file, next))
-  return next
+  // Read and written under the hooks' lock: an event recorded meanwhile is not lost.
+  return withStateLock(file, () => {
+    const state = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''))
+    const next = {
+      ...state,
+      turn: { struggled: false, reason: null, command: null },
+      streak: 0,
+      calm: 0,
+      pendingWarning: null,
+      started: true,
+      resetAt: now.toISOString(),
+    }
+    if (state.lanes && typeof state.lanes === 'object') {
+      next.lanes = Object.fromEntries(Object.entries(state.lanes).map(([k, v]) => [k, { ...v, turn: { struggled: false, reason: null, command: null }, streak: 0, calm: 0, pendingWarning: null, started: true }]))
+    }
+    // Temporary file + rename: the hooks never read a half-written state.
+    writeStateAtomic(file, next)
+    return next
+  })
 }
 
 // --- Hooks installed by the extension -------------------------------------------------
@@ -102,14 +106,56 @@ function hooksStatus(home, bundledSrc, folders = []) {
   const repo = folders.some(f => fs.existsSync(path.join(f, '.github', 'hooks', 'effort-guard.json')))
   let outdated = false
   if (user && bundledSrc) {
+    // Every bundled module, not only the entry point: a release can change detect.mjs
+    // alone. Line endings are ignored (a copy made from a Windows clone has CRLF).
+    const text = f => fs.readFileSync(f, 'utf8').replace(/\r\n/g, '\n')
+    let modules = []
     try {
-      const installed = fs.readFileSync(path.join(home, 'effort-guard', 'effort-guard.mjs'), 'utf8')
-      outdated = installed !== fs.readFileSync(path.join(bundledSrc, 'effort-guard.mjs'), 'utf8')
-    } catch {
-      outdated = fs.existsSync(path.join(bundledSrc, 'effort-guard.mjs'))
-    }
+      modules = fs.readdirSync(bundledSrc).filter(f => f.endsWith('.mjs'))
+    } catch {}
+    outdated = modules.some(f => {
+      try {
+        return text(path.join(home, 'effort-guard', f)) !== text(path.join(bundledSrc, f))
+      } catch {
+        return true
+      }
+    })
   }
   return { installed: user || repo, user, repo, outdated }
+}
+
+// --- Payload capture (what the hooks write with EFFORT_GUARD_DEBUG=1) -----------------
+
+// A flag file next to the hooks: the hooks check it on every event, so switching the
+// capture on needs no restart of VS Code (an environment variable would).
+const CAPTURE_FLAG = 'debug-capture'
+
+function captureFlag(home) {
+  return path.join(home, 'effort-guard', CAPTURE_FLAG)
+}
+
+function captureOn(home) {
+  return fs.existsSync(captureFlag(home))
+}
+
+function setCapture(home, on) {
+  const file = captureFlag(home)
+  if (on) {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, 'Payload capture is on: delete this file (or use the extension button) to stop it.\n')
+  } else {
+    fs.rmSync(file, { force: true })
+  }
+  return on
+}
+
+// How to get the value-free summary of the captured payloads of one project: the hook
+// script itself (`effort-guard payloads`), from the installed copy or the bundled one.
+function payloadSummaryCommand(home, bundledSrc, stateDir) {
+  const installed = path.join(home, 'effort-guard', 'effort-guard.mjs')
+  const bundled = bundledSrc ? path.join(bundledSrc, 'effort-guard.mjs') : null
+  const script = fs.existsSync(installed) ? installed : bundled && fs.existsSync(bundled) ? bundled : null
+  return script ? { script, args: [script, 'payloads'], env: { EFFORT_GUARD_DIR: stateDir, COPILOT_HOME: home } } : null
 }
 
 // --- Per-project thresholds (.effort-guard.json, read by the hooks) ------------------
@@ -204,8 +250,15 @@ function withStateLock(file, fn) {
 
 function writeStateAtomic(file, state) {
   const tmp = `${file}.${process.pid}.ext.tmp`
-  fs.writeFileSync(tmp, JSON.stringify(state))
-  fs.renameSync(tmp, file)
+  const json = JSON.stringify(state)
+  fs.writeFileSync(tmp, json)
+  try {
+    fs.renameSync(tmp, file)
+  } catch {
+    // Windows can refuse to replace a file another process has open.
+    fs.writeFileSync(file, json)
+    fs.rmSync(tmp, { force: true })
+  }
   stateCache.delete(file)
 }
 
@@ -213,7 +266,7 @@ function writeStateAtomic(file, state) {
 function voteLast(dir, vote) {
   const file = path.join(dir, 'state.json')
   return withStateLock(file, () => {
-    const state = JSON.parse(fs.readFileSync(file, 'utf8'))
+    const state = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''))
     const log = Array.isArray(state.log) ? [...state.log] : []
     if (!log.length) return null
     const last = { ...log[log.length - 1] }
@@ -254,6 +307,28 @@ function dailyHistory(log, days = 14, now = Date.now()) {
     if (e.struggled) out[i].struggling++
   }
   return out
+}
+
+// The log split by where the turn ran, so the model for Chat and the one for the CLI
+// can be chosen on their own numbers. Turns logged before 0.12.0 carry no kind.
+const CHANNEL_LABEL = { chat: 'Chat', cli: 'CLI', unknown: 'Before the split' }
+
+function byChannel(log) {
+  const groups = { chat: [], cli: [], unknown: [] }
+  for (const e of log ?? []) (groups[e?.kind] ?? groups.unknown).push(e)
+  return Object.entries(groups).map(([kind, entries]) => {
+    const struggling = entries.filter(e => e?.struggled).length
+    return {
+      kind,
+      label: CHANNEL_LABEL[kind],
+      turns: entries.length,
+      struggling,
+      rate: entries.length ? Math.round((struggling / entries.length) * 100) : null,
+      quality: qualitySummary(entries),
+      reasons: reasonCounts(entries).slice(0, 2),
+      history: dailyHistory(entries),
+    }
+  })
 }
 
 // Most frequent reasons of struggling turns, most frequent first.
@@ -388,6 +463,7 @@ function computeView(stateIn, fallbackThreshold = 3) {
     updated: state.updated ?? null,
     history: dailyHistory(log),
     reasons: reasonCounts(log),
+    channels: byChannel(log),
     quality: qualitySummary(log),
     lastVote: log.length ? log[log.length - 1].vote ?? null : null,
   }
@@ -405,7 +481,7 @@ function adviceMessages(streak, threshold, calm) {
 }
 
 // Fixed per process: a new nonce on every render would reload the panel each time.
-const NONCE = Math.random().toString(36).slice(2)
+const NONCE = crypto.randomBytes(16).toString('base64')
 
 function esc(v) {
   return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
@@ -461,6 +537,31 @@ function qualityHtml(view) {
 <div class="quality"><b style="color:${QUALITY_HEX[q.level]}">${esc(QUALITY_LABEL[q.level])} ${esc(score)}</b> <span class="muted">${q.rated ? `last ${q.rated} rated turns` : 'tests, follow-up prompts, re-edits and votes'}</span></div>
 ${parts.length ? `<div class="muted">${esc(parts.join(' \u00b7 '))}</div>` : ''}
 ${canVote ? `<div class="row vote"><button data-msg="vote-up" class="secondary${view.lastVote === 'up' ? ' on' : ''}" title="The last turn gave a good result">\u{1F44D} Good result</button><button data-msg="vote-down" class="secondary${view.lastVote === 'down' ? ' on' : ''}" title="The last turn gave a bad result">\u{1F44E} Bad result</button></div>` : ''}`
+}
+
+// Chat and CLI side by side: turns, how often they struggled, result quality, main causes
+// and a small history each. A Chat row with no turns while the CLI has some is said out
+// loud: the usual cause is that the Chat hooks are not running (or are seen as CLI).
+function channelsHtml(channels) {
+  const list = (channels ?? []).filter(c => c.turns > 0 || c.kind === 'chat')
+  if (!list.some(c => c.turns > 0)) return ''
+  const cli = list.find(c => c.kind === 'cli')
+  const rows = list
+    .map(c => {
+      const q = c.quality.score === null ? '-' : `${c.quality.score}%`
+      const why = c.reasons.map(r => `${esc(r.reason)} ${r.count}`).join(', ') || '-'
+      return `<tr><th>${esc(c.label)}</th><td>${c.turns}</td><td>${c.rate === null ? '-' : `${c.rate}%`}</td><td>${esc(q)}</td><td class="muted">${why}</td></tr>`
+    })
+    .join('')
+  const charts = list
+    .filter(c => c.turns > 0 && c.kind !== 'unknown' && c.history.some(d => d.turns))
+    .map(c => `<div class="muted">${esc(c.label)}</div>${historySvg(c.history)}`)
+    .join('')
+  const chat = list.find(c => c.kind === 'chat')
+  const warn = chat && chat.turns === 0 && cli && cli.turns > 0 ? `<div class="hint">No Chat turn recorded in this folder. If you use Copilot Chat here, its hooks are not reaching Effort Guard: run <code>node ~/.copilot/effort-guard/effort-guard.mjs doctor</code> and look at the <i>source</i> column.</div>` : ''
+  return `<h4>By channel</h4>
+<table class="channels"><tr><th></th><th>turns</th><th>struggling</th><th>quality</th><th>main causes</th></tr>${rows}</table>
+${charts}${warn}`
 }
 
 // HTML of the side panel: a segmented bar that changes colour with the model's effort level.
@@ -519,6 +620,9 @@ function renderHtml(view, now = Date.now()) {
   .mini { display: flex; gap: 2px; margin: 4px 0; }
   .mini span { flex: 1; height: 6px; border-radius: 2px; background: var(--vscode-input-background, #3338); }
   .mini span.on { background: var(--l); }
+  .channels { width: 100%; border-collapse: collapse; font-size: .9em; }
+  .channels th, .channels td { text-align: left; padding: 2px 6px 2px 0; }
+  .channels tr:first-child th { opacity: .65; font-weight: 400; }
 </style></head><body>
 <div class="level"><b>${esc(view.label)}</b>${badge}<span class="count">${view.streak}/${view.threshold} struggling turns in a row</span></div>
 <div class="bar">${segs}</div>
@@ -529,12 +633,15 @@ ${qualityHtml(view)}
 <h4>Last turns</h4>
 <div class="timeline">${dots}</div>
 ${view.hint ? `<div class="hint">${esc(view.hint)}</div>` : ''}
+${channelsHtml(view.channels)}
 ${sessions ? `<h4>Sessions in this folder</h4><ul>${sessions}</ul><div class="muted">Chat and CLI have separate streaks in each folder; CLI sessions share theirs.</div>` : ''}
 ${view.history?.some(d => d.turns) ? `<h4>Last ${view.history.length} days</h4>${historySvg(view.history)}<div class="muted">${esc(view.history[0].day)} \u2192 ${esc(view.history.at(-1).day)} \u00b7 red: struggling turns</div>` : ''}
 ${view.reasons?.length ? `<h4>Why it struggled</h4><ul>${view.reasons.map(r => `<li>${esc(r.reason)}: ${r.count}</li>`).join('')}</ul>` : ''}
 ${view.hooks && !view.hooks.installed ? `<div class="hint">The Copilot hooks are not installed, so there is nothing to show yet.<button data-msg="install">Install hooks</button></div>` : ''}
+${view.capture ? `<div class="hint">Payload capture is <b>on</b>: the hooks save every event (secrets masked) so the real field names can be checked. Switch it off when you are done.</div>` : ''}
 ${view.hooks?.outdated ? `<div class="hint">The installed hooks are older than this extension.<button data-msg="install">Update hooks</button></div>` : ''}
 <button id="reset" data-msg="reset" title="Use it after changing model or thinking effort">Reset after changing model / thinking</button>
+<div class="row"><button data-msg="capture" class="secondary" title="Saves the raw hook payloads (secrets masked) so the field names Copilot really sends can be checked">${view.capture ? 'Stop capturing payloads' : 'Capture payloads'}</button><button data-msg="payloads" class="secondary" title="Copies the shape of the captured payloads (field names and types, no values) to the clipboard">Copy payload summary</button></div>
 <div class="row"><button data-msg="thresholds" class="secondary">Thresholds (${view.threshold} / ${view.calmThreshold})\u2026</button><button data-msg="csv" class="secondary">Export CSV</button></div>
 <div class="meta muted">Session: ${session}<br>Folder: ${esc(view.cwd ?? '-')}<br>Last activity: ${esc(ageText(view.updated, now))}</div>
 <script nonce="${NONCE}">const vs = acquireVsCodeApi(); document.querySelectorAll('button[data-msg]').forEach(b => b.addEventListener('click', () => vs.postMessage({ type: b.dataset.msg })))</script>
@@ -543,13 +650,20 @@ ${view.hooks?.outdated ? `<div class="hint">The installed hooks are older than t
 
 // Which notification to show, if any: 'warn' when the streak has just reached the
 // threshold, 'escalate' at twice the threshold, 'calm' at the calm threshold.
+// With Chat and CLI lanes each lane is compared with its own previous value: the
+// top-level streak mirrors whichever lane acted last, so it jumps between the two and
+// would raise the same notification again at every switch.
 function shouldNotify(prev, cur, fallbackThreshold = 3) {
   if (!cur) return null
   const threshold = cur.threshold || fallbackThreshold
-  if ((cur.streak || 0) >= threshold * 2 && (prev?.streak || 0) < threshold * 2) return 'escalate'
-  if ((cur.streak || 0) >= threshold && (prev?.streak || 0) < threshold) return 'warn'
   const calmThreshold = cur.calmThreshold || 8
-  if ((cur.calm || 0) >= calmThreshold && (prev?.calm || 0) < calmThreshold) return 'calm'
+  const lanes = cur.lanes && typeof cur.lanes === 'object' ? ['chat', 'cli'].filter(k => cur.lanes[k] && typeof cur.lanes[k] === 'object') : []
+  // A lane seen for the first time is compared with the state before lanes existed.
+  const pairs = lanes.length ? lanes.map(k => [prev?.lanes?.[k] ?? (prev?.lanes ? null : prev), cur.lanes[k]]) : [[prev, cur]]
+  const crossed = (key, limit) => pairs.some(([p, c]) => (c[key] || 0) >= limit && (p?.[key] || 0) < limit)
+  if (crossed('streak', threshold * 2)) return 'escalate'
+  if (crossed('streak', threshold)) return 'warn'
+  if (crossed('calm', calmThreshold)) return 'calm'
   return null
 }
 
@@ -566,4 +680,4 @@ function formatReport(projects, now = Date.now()) {
     .join('\n\n')
 }
 
-module.exports = { qualityOf, qualitySummary, voteLast, QUALITY_HEX, hooksStatus, readConfig, writeConfig, validateThreshold, dailyHistory, reasonCounts, toCsv, historySvg, CONFIG_FILE, readState, resetProject, sessionKind, copilotHome, readProjects, findState, computeView, levelOf, textBar, renderHtml, shouldNotify, formatReport, isInside, LEVEL_THEME_COLOR, LEVEL_HEX }
+module.exports = { captureFlag, captureOn, setCapture, payloadSummaryCommand, qualityOf, qualitySummary, voteLast, QUALITY_HEX, hooksStatus, readConfig, writeConfig, validateThreshold, dailyHistory, reasonCounts, toCsv, historySvg, CONFIG_FILE, readState, resetProject, sessionKind, copilotHome, readProjects, findState, computeView, byChannel, levelOf, textBar, renderHtml, shouldNotify, formatReport, isInside, LEVEL_THEME_COLOR, LEVEL_HEX }

@@ -80,8 +80,9 @@ export function exitCodeOf(result, text = '') {
       return Number(v)
     }
   }
-  const m = /\bexit(?:ed)?(?: with)?(?: exit)? code[:=]?\s*(-?\d+)/i.exec(String(text).slice(-MAX_TEXT))
-  return m ? Number(m[1]) : null
+  // The verdict is the last one printed: earlier lines can quote another command's code.
+  const all = [...String(text).slice(-MAX_TEXT).matchAll(/\bexit(?:ed)?(?: with)?(?: exit)? code[:=]?\s*(-?\d+)/gi)]
+  return all.length ? Number(all.at(-1)[1]) : null
 }
 
 // Commands whose non-zero exit is an answer, not a failure (no match, files differ...).
