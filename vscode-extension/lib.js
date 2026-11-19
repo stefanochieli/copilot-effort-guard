@@ -558,7 +558,7 @@ function channelsHtml(channels) {
     .map(c => `<div class="muted">${esc(c.label)}</div>${historySvg(c.history)}`)
     .join('')
   const chat = list.find(c => c.kind === 'chat')
-  const warn = chat && chat.turns === 0 && cli && cli.turns > 0 ? `<div class="hint">No Chat turn recorded in this folder. If you use Copilot Chat here, its hooks are not reaching Effort Guard: run <code>node ~/.copilot/effort-guard/effort-guard.mjs doctor</code> and look at the <i>source</i> column.</div>` : ''
+  const warn = chat && chat.turns === 0 && cli && cli.turns > 0 ? `<div class="hint">No Chat turn recorded in this folder. If you use Copilot Chat here, VS Code does not load <code>~/.copilot/hooks</code> by itself.<button data-msg="chat-hooks">Enable Chat hooks</button></div>` : ''
   return `<h4>By channel</h4>
 <table class="channels"><tr><th></th><th>turns</th><th>struggling</th><th>quality</th><th>main causes</th></tr>${rows}</table>
 ${charts}${warn}`
@@ -680,4 +680,12 @@ function formatReport(projects, now = Date.now()) {
     .join('\n\n')
 }
 
-module.exports = { captureFlag, captureOn, setCapture, payloadSummaryCommand, qualityOf, qualitySummary, voteLast, QUALITY_HEX, hooksStatus, readConfig, writeConfig, validateThreshold, dailyHistory, reasonCounts, toCsv, historySvg, CONFIG_FILE, readState, resetProject, sessionKind, copilotHome, readProjects, findState, computeView, byChannel, levelOf, textBar, renderHtml, shouldNotify, formatReport, isInside, LEVEL_THEME_COLOR, LEVEL_HEX }
+// chat.hookFilesLocations maps a folder to on/off: adds the hooks folder, keeps the others.
+function withHookLocation(current, dir) {
+  const base = current && typeof current === 'object' && !Array.isArray(current) ? current : {}
+  const norm = p => String(p).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  const key = Object.keys(base).find(k => norm(k) === norm(dir))
+  return { ...base, [key ?? dir]: true }
+}
+
+module.exports = { withHookLocation, captureFlag, captureOn, setCapture, payloadSummaryCommand, qualityOf, qualitySummary, voteLast, QUALITY_HEX, hooksStatus, readConfig, writeConfig, validateThreshold, dailyHistory, reasonCounts, toCsv, historySvg, CONFIG_FILE, readState, resetProject, sessionKind, copilotHome, readProjects, findState, computeView, byChannel, levelOf, textBar, renderHtml, shouldNotify, formatReport, isInside, LEVEL_THEME_COLOR, LEVEL_HEX }
