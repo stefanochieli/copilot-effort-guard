@@ -113,6 +113,22 @@ function installHooks() {
   )
 }
 
+// VS Code Chat does not read ~/.copilot/hooks by itself: the folder must be listed in
+// chat.hookFilesLocations. Installs the hooks if needed, then adds that folder (user setting).
+async function enableChatHooks() {
+  const { home } = settings()
+  const dir = path.join(home, 'hooks')
+  if (!fs.existsSync(path.join(dir, 'effort-guard.json'))) await installHooks()
+  if (!fs.existsSync(path.join(dir, 'effort-guard.json'))) return
+  try {
+    const cfg = vscode.workspace.getConfiguration('chat')
+    await cfg.update('hookFilesLocations', lib.withHookLocation(cfg.get('hookFilesLocations'), dir), vscode.ConfigurationTarget.Global)
+    vscode.window.showInformationMessage('Effort Guard: Chat hooks enabled. Reload the window, then send a prompt in agent mode: the Chat lane appears after the first tool call.', 'Reload Window').then(a => a && vscode.commands.executeCommand('workbench.action.reloadWindow'))
+  } catch (err) {
+    vscode.window.showErrorMessage(`Effort Guard: could not update chat.hookFilesLocations (${err.message}). Add "${dir}": true to it by hand.`)
+  }
+}
+
 // Offers the install once, when nothing is installed (or the per-user copy is outdated).
 function offerInstall() {
   const state = extensionContext.globalState
@@ -229,7 +245,7 @@ function copyPayloadSummary() {
   })
 }
 
-const PANEL_ACTIONS = { capture: () => toggleCapture(), payloads: () => copyPayloadSummary(), 'vote-up': () => vote('up'), 'vote-down': () => vote('down'), reset: () => resetEvaluation(), install: () => installHooks(), thresholds: () => setThresholds(), csv: () => exportCsv() }
+const PANEL_ACTIONS = { capture: () => toggleCapture(), payloads: () => copyPayloadSummary(), 'vote-up': () => vote('up'), 'vote-down': () => vote('down'), reset: () => resetEvaluation(), install: () => installHooks(), 'chat-hooks': () => enableChatHooks(), thresholds: () => setThresholds(), csv: () => exportCsv() }
 
 function activate(context) {
   extensionContext = context
@@ -257,6 +273,7 @@ function activate(context) {
     vscode.commands.registerCommand('effortGuard.toggleCapture', toggleCapture),
     vscode.commands.registerCommand('effortGuard.copyPayloadSummary', copyPayloadSummary),
     vscode.commands.registerCommand('effortGuard.installHooks', installHooks),
+    vscode.commands.registerCommand('effortGuard.enableChatHooks', enableChatHooks),
     vscode.commands.registerCommand('effortGuard.setThresholds', setThresholds),
     vscode.commands.registerCommand('effortGuard.exportCsv', exportCsv),
     vscode.commands.registerCommand('effortGuard.voteUp', () => vote('up')),

@@ -45,6 +45,10 @@
         "title": "Effort Guard: Install or update the Copilot hooks"
       },
       {
+        "command": "effortGuard.enableChatHooks",
+        "title": "Effort Guard: Enable the hooks for Copilot Chat"
+      },
+      {
         "command": "effortGuard.setThresholds",
         "title": "Effort Guard: Set thresholds for this project"
       },

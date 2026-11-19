@@ -373,3 +373,11 @@ test('the panel offers the capture switch and the summary button', () => {
   assert.match(html, /data-msg="payloads"/)
   assert.match(lib.renderHtml({ ...lib.computeView({ streak: 0, turn: {}, log: [] }), capture: true }), /Stop capturing payloads/)
 })
+
+test('withHookLocation adds the hooks folder once and keeps the others', async () => {
+  const { createRequire } = await import('node:module')
+  const lib = createRequire(import.meta.url)('../vscode-extension/lib.js')
+  assert.deepEqual(lib.withHookLocation(undefined, 'C:\\Users\\a\\.copilot\\hooks'), { 'C:\\Users\\a\\.copilot\\hooks': true })
+  const cur = { '.github/hooks': true, 'c:/users/a/.copilot/hooks/': false }
+  assert.deepEqual(lib.withHookLocation(cur, 'C:\\Users\\a\\.copilot\\hooks'), { '.github/hooks': true, 'c:/users/a/.copilot/hooks/': true })
+})
