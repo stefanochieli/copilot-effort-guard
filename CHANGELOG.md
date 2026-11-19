@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.14.0](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.13.0...v0.14.0) (2026-11-19)
+
+
+### Features
+
+* **vscode:** command to enable the hooks for Copilot Chat ([14d7a87](https://github.com/stefanochieli/copilot-effort-guard/commit/14d7a87472a3797cfda6a896f67172ab5917b56f))
+* **vscode:** enable the hooks for Copilot Chat from the extension ([4233002](https://github.com/stefanochieli/copilot-effort-guard/commit/4233002638fa016286f098cc9a06de3e7c12406e))
+
+
+### Bug Fixes
+
+* apply_patch re-edit detection and Chat hook guidance ([63371a7](https://github.com/stefanochieli/copilot-effort-guard/commit/63371a7c61bd759d4d7386aae20a5ce033c57a18))
+* parse apply_patch string args for re-edit detection; hint when Chat hooks are not loaded ([4355cad](https://github.com/stefanochieli/copilot-effort-guard/commit/4355cad9fb3e67bcef8c2f6183858aab8c56cd32))
+
 ## [0.13.0](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.12.1...v0.13.0) (2026-11-17)
 
 
