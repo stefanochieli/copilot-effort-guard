@@ -457,6 +457,15 @@ test('rework prompts in Italian and English, not ordinary requests', () => {
     assert.equal(looksLikeRework(p), false, String(p))
 })
 
+test('apply_patch string args: edited files come from the patch headers', () => {
+  const patch = '*** Begin Patch\n*** Update File: src/A.js\n@@\n-a\n+b\n*** Add File: src/New.js\n+x\n*** End Patch'
+  const t = readTool({ toolName: 'apply_patch', toolArgs: patch })
+  assert.ok(isEditTool(t.tool))
+  const files = editedFiles(t.args)
+  assert.equal(files.length, 2)
+  assert.equal(files[0], editedFiles({ path: 'src/a.js' })[0])
+})
+
 test('quality signals: last test outcome, re-edited files, rework on the closed turn', () => {
   const edit = f => ({ toolName: 'edit', toolArgs: { path: f }, toolResult: { resultType: 'success' } })
   const green = { toolName: 'bash', toolArgs: { command: 'npm test' }, toolResult: { textResultForLlm: '12 passing' } }
