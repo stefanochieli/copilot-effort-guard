@@ -24,6 +24,9 @@ export function editedFiles(args) {
   for (const k of ['files', 'filePaths', 'paths']) {
     if (Array.isArray(args[k])) for (const f of args[k]) if (typeof f === 'string') raw.push(f)
   }
+  if (typeof args.patch === 'string') {
+    for (const m of args.patch.matchAll(/^\*\*\* (?:Update|Add|Delete) File:\s*(.+?)\s*$|^\*\*\* Move to:\s*(.+?)\s*$/gm)) raw.push(m[1] ?? m[2])
+  }
   const norm = p => p.replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase()
   return [...new Set(raw.slice(0, 50).map(p => createHash('sha1').update(norm(p)).digest('hex').slice(0, 10)))]
 }

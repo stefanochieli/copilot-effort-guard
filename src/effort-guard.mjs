@@ -42,7 +42,9 @@ export function pick(obj, ...keys) {
 // Normalises a tool payload into { tool, command, text }.
 export function readTool(payload) {
   const input = pick(payload, 'toolArgs', 'tool_input', 'toolInput') ?? {}
-  const parsed = typeof input === 'string' ? safeJson(input) : input
+  let parsed = typeof input === 'string' ? safeJson(input) : input
+  // apply_patch sends the patch itself as a plain string, not JSON.
+  if (typeof input === 'string' && input.trim() && Object.keys(parsed).length === 0 && !/^\s*[{[]/.test(input)) parsed = { patch: input }
   const result = pick(payload, 'toolResult', 'tool_response', 'toolResponse', 'tool_result') ?? {}
   let text = typeof result === 'string' ? result : pick(result, 'textResultForLlm', 'text', 'stdout', 'output') ?? ''
   // postToolUseFailure and errorOccurred carry no result: the message is in `error`
