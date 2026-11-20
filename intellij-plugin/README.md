@@ -54,7 +54,7 @@ La logica in `core/` ha i suoi test (`EffortCoreTest.kt`); l'interfaccia si prov
 
 ## Release
 
-La versione in `gradle.properties` è aggiornata da release-please insieme al resto del repository. A ogni release il job `publish-intellij-plugin` costruisce lo zip e lo allega alla GitHub Release. Se nei secret del repo c'è `JETBRAINS_PUBLISH_TOKEN` (token di <https://plugins.jetbrains.com/author/me/tokens>), lo stesso job pubblica lo zip anche sul JetBrains Marketplace con `publishPlugin`; ogni versione passa da una breve revisione JetBrains. Il primo upload della scheda va fatto a mano.
+La versione in `gradle.properties` è aggiornata da `prepare-release` insieme al resto del repository. A ogni release il job `publish-intellij-plugin` costruisce lo zip e lo allega alla GitHub Release. Se nei secret del repo c'è `JETBRAINS_PUBLISH_TOKEN` (token di <https://plugins.jetbrains.com/author/me/tokens>), lo stesso job pubblica lo zip anche sul JetBrains Marketplace con `publishPlugin`; ogni versione passa da una breve revisione JetBrains. Il primo upload della scheda va fatto a mano.
 
 ## Storico e soglie
 

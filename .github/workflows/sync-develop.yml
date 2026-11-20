@@ -1,6 +1,6 @@
 name: sync-develop
 
-# Dopo ogni merge su main (PR develop -> main, PR di release di release-please) riporta main dentro develop,
+# Dopo ogni merge su main (PR develop -> main, workflow release) riporta main dentro develop,
 # cosi' develop non resta mai indietro del commit di release (versione, manifest, changelog).
 # Se il push diretto su develop e' bloccato dalla ruleset, apre una PR main -> develop.
 on:
