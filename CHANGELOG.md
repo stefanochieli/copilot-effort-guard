@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.14.1] — 2026-11-20
+
+### Correzioni
+
+- Flusso di release: workflow prepare-release, release-guard e release (come claude-effort-guard) al posto di release-please
+
 ## [0.14.0](https://github.com/stefanochieli/copilot-effort-guard/compare/v0.13.0...v0.14.0) (2026-11-19)
 
 
