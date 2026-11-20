@@ -3,9 +3,8 @@ on:
   pull_request:
   push:
     branches: [main]
-  # Dispatched by auto-release.yml on the release PR branch: a PR opened with
-  # GITHUB_TOKEN does not trigger pull_request workflows, so without this the
-  # required "checks" would never run on it.
+  # Manual run (e.g. on the release PR branch when it was opened with GITHUB_TOKEN,
+  # which does not trigger pull_request workflows).
   workflow_dispatch:
 permissions:
   contents: read

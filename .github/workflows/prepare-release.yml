@@ -1,0 +1,66 @@
+name: prepare-release
+
+# Parte a mano (Actions -> prepare-release -> Run workflow): bump di versione (CHANGELOG, package.json, vscode-extension/package.json, intellij-plugin/gradle.properties)
+# su develop e PR develop -> main "Release vX.Y.Z" con le note nel corpo.
+# Per far partire i check sulla PR serve il secret RELEASE_PAT (PAT con contents e pull-requests in scrittura):
+# le PR create con GITHUB_TOKEN non attivano altri workflow. Serve anche, nelle impostazioni del repo,
+# "Allow GitHub Actions to create and approve pull requests".
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Incremento di versione (semver)"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      notes:
+        description: "Note della versione (vuoto = commit dall'ultimo tag, raggruppati per feat/fix/altro)"
+        type: string
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: prepare-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: develop
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT || github.token }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+      - name: Nessuna PR di release gia' aperta
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || github.token }}
+        run: |
+          N=$(gh pr list --base main --head develop --state open --json number --jq 'length')
+          if [ "$N" != "0" ]; then echo "::error::Esiste gia' una PR develop -> main aperta."; exit 1; fi
+      - name: Bump di versione
+        env:
+          BUMP: ${{ inputs.bump }}
+          NOTES: ${{ inputs.notes }}
+        run: |
+          if [ -n "$NOTES" ]; then node .github/scripts/bump-version.mjs "$BUMP" --notes "$NOTES"
+          else node .github/scripts/bump-version.mjs "$BUMP"; fi
+      - name: Commit su develop e PR verso main
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || github.token }}
+        run: |
+          V=$(grep -m1 -oE '^## \[[0-9]+(\.[0-9]+)+\]' CHANGELOG.md | grep -oE '[0-9]+(\.[0-9]+)+')
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: release v$V"
+          git push origin HEAD:develop
+          awk -v v="$V" '/^## \[/{ if (p) exit; if (index($0,"["v"]")) p=1 } p' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          printf '\n\n---\nMerge con **merge commit** (non squash), senza eliminare develop. La release parte da sola al merge.\n' >> "$RUNNER_TEMP/notes.md"
+          gh pr create --base main --head develop --title "Release v$V" --body-file "$RUNNER_TEMP/notes.md"
