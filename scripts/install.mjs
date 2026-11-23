@@ -78,7 +78,7 @@ if (user) {
   console.log(`  node "${entry}" doctor`)
   console.log(`State is kept per working directory in ${join(codeDir, 'state')} (set EFFORT_GUARD_DIR to share one folder).`)
   if (existsSync(join(resolve(process.cwd()), '.github', 'hooks', 'effort-guard.json'))) {
-    console.log('Warning: this folder also has .github/hooks/effort-guard.json: with both registered the hooks run twice per event.')
+    console.log('Note: this folder also has .github/hooks/effort-guard.json: that repository copy steps aside while the per-user hooks are installed (it is there for Copilot cloud agent).')
   }
 } else if (!process.argv.includes('--no-gitignore')) {
   // The state is local: it must not end up in the team's repository.

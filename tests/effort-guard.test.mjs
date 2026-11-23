@@ -803,3 +803,17 @@ test('cloud agent: agentStop / sessionEnd print a progress line with the job rep
   const quiet = execFileSync('node', ['src/effort-guard.mjs', 'stop'], { input: '{}', env: { ...process.env, EFFORT_GUARD_DIR: dir, COPILOT_AGENT_PROMPT: '', GITHUB_COPILOT_API_TOKEN: '' }, encoding: 'utf8' })
   assert.equal(quiet, '')
 })
+
+import { repoCopyShadowed } from '../src/effort-guard.mjs'
+
+
+test('a repository copy steps aside locally when the per-user hooks are installed', () => {
+  const home = mkdtempSync(join(tmpdir(), 'eg-home-'))
+  const repoCopy = join(tmpdir(), 'repo', '.effort-guard-hooks', 'effort-guard.mjs')
+  assert.equal(repoCopyShadowed(repoCopy, { COPILOT_HOME: home }), false, 'no user install')
+  mkdirSync(join(home, 'hooks'), { recursive: true })
+  writeFileSync(join(home, 'hooks', 'effort-guard.json'), '{}')
+  assert.equal(repoCopyShadowed(repoCopy, { COPILOT_HOME: home }), true)
+  assert.equal(repoCopyShadowed(join(home, 'effort-guard', 'effort-guard.mjs'), { COPILOT_HOME: home }), false, 'the user copy itself')
+  assert.equal(repoCopyShadowed(repoCopy, { COPILOT_HOME: home, EFFORT_GUARD_REPO_HOOKS: '1' }), false)
+})

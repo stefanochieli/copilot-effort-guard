@@ -11,7 +11,7 @@
 // defensively because Copilot delivers camelCase or snake_case depending on the
 // event key casing and version.
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, readdirSync, statSync, renameSync, rmdirSync, rmSync, realpathSync } from 'node:fs'
-import { dirname, join, relative, isAbsolute, resolve } from 'node:path'
+import { basename, dirname, join, relative, isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
@@ -426,6 +426,19 @@ export function thresholds(env = process.env, config = {}) {
     // 0 turns the pause reset off.
     gapMinutes: intIn(env.EFFORT_GUARD_GAP_MINUTES, 0, 10080) ?? intIn(config.gapMinutes, 0, 10080) ?? DEFAULT_GAP_MINUTES,
     resetOnSession: (env.EFFORT_GUARD_RESET_ON_SESSION ?? '') !== '' ? env.EFFORT_GUARD_RESET_ON_SESSION === '1' : config.resetOnSessionChange === true,
+  }
+}
+
+// True for a copy of this script outside COPILOT_HOME when the per-user hooks are installed.
+// EFFORT_GUARD_REPO_HOOKS=1 keeps the repository copy active anyway.
+export function repoCopyShadowed(self = fileURLToPath(import.meta.url), env = process.env) {
+  if (env.EFFORT_GUARD_REPO_HOOKS === '1') return false
+  const home = env.COPILOT_HOME ?? join(homedir(), '.copilot')
+  try {
+    // Only the copy written by `install.mjs <repo>`: the source tree (tests, npm scripts) always runs.
+    return basename(dirname(self)) === '.effort-guard-hooks' && !isUnder(self, home) && existsSync(join(home, 'hooks', 'effort-guard.json'))
+  } catch {
+    return false
   }
 }
 
@@ -971,6 +984,11 @@ function main() {
   const cloud = isCloud()
   // agentStop / sessionEnd are registered for the cloud agent only; elsewhere they are a no-op.
   if ((event === 'stop' || event === 'end') && !cloud) {
+    return
+  }
+  // A repository copy (.effort-guard-hooks/) exists for the cloud agent; on a machine that
+  // also has the per-user install it would count every event twice, so it steps aside.
+  if (!cloud && repoCopyShadowed()) {
     return
   }
 
