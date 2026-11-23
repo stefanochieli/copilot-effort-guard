@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.16.0] — 2026-11-23
+
+### Novità
+
+- --cloud install writes only the hook file and downloads the release in the sandbox (#86)
+
 ## [0.15.0] — 2026-11-23
 
 ### Novità
