@@ -11,7 +11,7 @@
 // defensively because Copilot delivers camelCase or snake_case depending on the
 // event key casing and version.
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, readdirSync, statSync, renameSync, rmdirSync, rmSync, realpathSync } from 'node:fs'
-import { dirname, join, relative, isAbsolute, resolve } from 'node:path'
+import { basename, dirname, join, relative, isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
@@ -79,7 +79,7 @@ export function readTool(payload) {
 // never drives the struggle logic.
 const CHAT_KEYS = ['hook_event_name', 'hookEventName', 'session_id', 'transcript_path', 'tool_name', 'tool_input', 'tool_response', 'tool_use_id']
 // Variable names only: their values are never read or logged.
-export const HOST_ENV = ['ELECTRON_RUN_AS_NODE', 'VSCODE_CRASH_REPORTER_PROCESS_TYPE', 'VSCODE_PID', 'VSCODE_IPC_HOOK', 'TERM_PROGRAM', 'WT_SESSION', 'COPILOT_CLI', 'COPILOT_HOME']
+export const HOST_ENV = ['ELECTRON_RUN_AS_NODE', 'VSCODE_CRASH_REPORTER_PROCESS_TYPE', 'VSCODE_PID', 'VSCODE_IPC_HOOK', 'TERM_PROGRAM', 'WT_SESSION', 'COPILOT_CLI', 'COPILOT_HOME', 'COPILOT_AGENT_PROMPT', 'GITHUB_COPILOT_API_TOKEN']
 
 export function hostEnv(env = process.env) {
   return HOST_ENV.filter(k => env[k] !== undefined && env[k] !== '')
@@ -92,7 +92,15 @@ export function hostEnv(env = process.env) {
 // the names that arrive.
 const CHAT_TOOL = /^(run_in_terminal|read_file|grep_search|file_search|list_dir|semantic_search|replace_string_in_file|multi_replace_string_in_file|insert_edit_into_file|create_file|create_directory|get_errors|runTests|run_vs_code_task|fetch_webpage|vscode_|copilot_|mcp_)/
 
+// Copilot cloud agent: hooks run in GitHub's Linux sandbox, which sets these (names
+// only, never the values). See the "Cloud agent execution environment" table of the
+// GitHub hooks reference.
+export function isCloud(env = process.env) {
+  return Boolean(env.COPILOT_AGENT_PROMPT || env.GITHUB_COPILOT_API_TOKEN)
+}
+
 export function sessionSource(payload, env = process.env) {
+  if (isCloud(env)) return 'cloud'
   const chatTool = CHAT_TOOL.test(String(pick(payload, 'toolName', 'tool_name') ?? ''))
   const chatPayload = chatTool || CHAT_KEYS.some(k => pick(payload, k) !== undefined)
   const inTerminal = Boolean(env.TERM_PROGRAM || env.WT_SESSION || env.TERM_SESSION_ID)
@@ -135,6 +143,12 @@ export function normaliseEvent(name) {
     case 'posttoolusefailure':
     case 'erroroccurred':
       return 'failure'
+    case 'stop':
+    case 'agentstop':
+      return 'stop'
+    case 'end':
+    case 'sessionend':
+      return 'end'
     case 'summary':
       return 'summary'
     case 'selftest':
@@ -269,8 +283,13 @@ export function onTool(state, payload, { failed: failedEvent = false, rules = er
   }
   if (isShell && isTestCommand(command)) {
     quality.tests = isTestSuccess(command, text, exitCode) && !failed ? 'green' : 'red'
+    // Test/build runs in this turn: the cloud agent has a single turn per job, so its
+    // struggle is measured on red runs in a row inside the turn (see cloudWarning).
+    const reds = quality.tests === 'red' ? (state.turn.reds ?? 0) + 1 : 0
+    Object.assign(quality, { runs: (state.turn.runs ?? 0) + 1, redRuns: (state.turn.redRuns ?? 0) + (reds ? 1 : 0), reds, maxReds: Math.max(state.turn.maxReds ?? 0, reds) })
   }
-  const keep = { files: state.turn.files, tests: state.turn.tests, ...(missing || state.turn.missing ? { missing: true } : {}), ...quality }
+  const counters = Object.fromEntries(['runs', 'redRuns', 'reds', 'maxReds'].filter(k => state.turn[k] !== undefined).map(k => [k, state.turn[k]]))
+  const keep = { files: state.turn.files, tests: state.turn.tests, ...counters, ...(missing || state.turn.missing ? { missing: true } : {}), ...quality }
 
   if (!reason) {
     // Red then green in the same turn (TDD, or a fix that worked) is not a struggle.
@@ -407,6 +426,19 @@ export function thresholds(env = process.env, config = {}) {
     // 0 turns the pause reset off.
     gapMinutes: intIn(env.EFFORT_GUARD_GAP_MINUTES, 0, 10080) ?? intIn(config.gapMinutes, 0, 10080) ?? DEFAULT_GAP_MINUTES,
     resetOnSession: (env.EFFORT_GUARD_RESET_ON_SESSION ?? '') !== '' ? env.EFFORT_GUARD_RESET_ON_SESSION === '1' : config.resetOnSessionChange === true,
+  }
+}
+
+// True for a copy of this script outside COPILOT_HOME when the per-user hooks are installed.
+// EFFORT_GUARD_REPO_HOOKS=1 keeps the repository copy active anyway.
+export function repoCopyShadowed(self = fileURLToPath(import.meta.url), env = process.env) {
+  if (env.EFFORT_GUARD_REPO_HOOKS === '1') return false
+  const home = env.COPILOT_HOME ?? join(homedir(), '.copilot')
+  try {
+    // Only the copy written by `install.mjs <repo>`: the source tree (tests, npm scripts) always runs.
+    return basename(dirname(self)) === '.effort-guard-hooks' && !isUnder(self, home) && existsSync(join(home, 'hooks', 'effort-guard.json'))
+  } catch {
+    return false
   }
 }
 
@@ -661,7 +693,39 @@ export function promptKey(payload) {
   return session !== undefined && ts !== undefined ? `${session}|${ts}` : null
 }
 
-export function run(event, payload, state, threshold, now = new Date(), calmThreshold = DEFAULT_CALM, lane = null, { rules = errorRules(), session = null } = {}) {
+// Cloud agent: one prompt per job, so the streak of struggling turns never grows. The
+// advice is given inside the turn instead, when the test/build runs stay red: at the
+// threshold and at twice the threshold, once each.
+export function cloudWarning(before, after, threshold) {
+  const reds = after.turn?.reds ?? 0
+  if (reds <= (before.turn?.reds ?? 0)) return null
+  if (reds === threshold) {
+    return `effort-guard: ${reds} test/build runs in a row failed in this job. Step back before the next attempt: re-read the first error, write down a hypothesis and change approach instead of retrying the same fix.`
+  }
+  if (reds === threshold * 2) {
+    return `effort-guard: ${reds} test/build runs in a row failed in this job. The approach is not converging: stop editing, describe in the pull request what you tried and what still fails, and leave the decision to the reviewer.`
+  }
+  return null
+}
+
+// One line for the cloud agent's session log: what the job did with tests and files.
+export function cloudReport(state) {
+  const t = state.turn ?? {}
+  const runs = t.runs ?? 0
+  const tests = runs ? `${runs} test/build runs, ${t.redRuns ?? 0} red, longest red streak ${t.maxReds ?? 0}, last ${t.tests}` : 'no test/build run'
+  const files = t.files?.length ?? 0
+  return `effort-guard (cloud): ${tests}; ${files} file${files === 1 ? '' : 's'} edited; ${t.struggled ? `struggling (${t.reason})` : 'no open struggle'}.`
+}
+
+function progressLine(message) {
+  return { type: 'progress', message }
+}
+
+export function run(event, payload, state, threshold, now = new Date(), calmThreshold = DEFAULT_CALM, lane = null, { rules = errorRules(), session = null, cloud = false } = {}) {
+  if (event === 'stop' || event === 'end') {
+    // Only the cloud agent gets a report: there the session log is the only place to see it.
+    return { state, stderr: null, stdout: null, progress: cloud ? progressLine(cloudReport(state)) : null }
+  }
   if (event === 'prompt') {
     // The same hook registered twice (user and repository files) delivers the same
     // prompt twice: closing the turn twice would see a clean turn and reset the streak.
@@ -701,6 +765,11 @@ export function run(event, payload, state, threshold, now = new Date(), calmThre
       next = { ...next, pendingWarning: null }
       const name = pick(payload, 'hook_event_name', 'hookEventName') ?? (event === 'failure' ? 'PostToolUseFailure' : 'PostToolUse')
       return { state: next, stderr: warning, stdout: warningOutput(warning, name), delivered: true }
+    }
+    const advice = cloud ? cloudWarning(state, next, threshold) : null
+    if (advice) {
+      const name = pick(payload, 'hook_event_name', 'hookEventName') ?? (event === 'failure' ? 'PostToolUseFailure' : 'PostToolUse')
+      return { state: next, stderr: advice, stdout: warningOutput(advice, name), progress: progressLine(advice) }
     }
     return { state: next, stderr: null, stdout: null }
   }
@@ -912,6 +981,16 @@ function main() {
     return
   }
   debugDump(event, payload, input)
+  const cloud = isCloud()
+  // agentStop / sessionEnd are registered for the cloud agent only; elsewhere they are a no-op.
+  if ((event === 'stop' || event === 'end') && !cloud) {
+    return
+  }
+  // A repository copy (.effort-guard-hooks/) exists for the cloud agent; on a machine that
+  // also has the per-user install it would count every event twice, so it steps aside.
+  if (!cloud && repoCopyShadowed()) {
+    return
+  }
 
   const path = statePath()
   const config = projectConfig(activeCwd)
@@ -931,7 +1010,7 @@ function main() {
     const view = laneView(before, lane)
     const last = before.lanes ? before.lanes[lane]?.last : before.updated
     const start = event === 'prompt' ? newEpisode(view, { last, now, gapMinutes, sessionId: session.id, resetOnSession }) : view
-    const result = run(event, payload, start, threshold, now, calmThreshold, lane, { rules, session })
+    const result = run(event, payload, start, threshold, now, calmThreshold, lane, { rules, session, cloud })
     if (result.duplicate) {
       return
     }
@@ -952,6 +1031,11 @@ function main() {
     if (result.stderr) {
       // stderr is shown to the user; stdout JSON is offered to the agent as context.
       console.error(result.stderr)
+    }
+    // A progress line (one JSON object on its own line) goes to the agent's timeline and
+    // is stripped before the hook output is parsed.
+    if (result.progress) {
+      console.log(JSON.stringify(result.progress))
     }
     if (result.stdout) {
       console.log(JSON.stringify(result.stdout))

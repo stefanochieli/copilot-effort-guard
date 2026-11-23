@@ -543,7 +543,7 @@ ${canVote ? `<div class="row vote"><button data-msg="vote-up" class="secondary${
 // and a small history each. A Chat row with no turns while the CLI has some is said out
 // loud: the usual cause is that the Chat hooks are not running (or are seen as CLI).
 function channelsHtml(channels) {
-  const list = (channels ?? []).filter(c => c.turns > 0 || c.kind === 'chat')
+  const list = (channels ?? []).filter(c => c.turns > 0)
   if (!list.some(c => c.turns > 0)) return ''
   const cli = list.find(c => c.kind === 'cli')
   const rows = list
@@ -558,7 +558,11 @@ function channelsHtml(channels) {
     .map(c => `<div class="muted">${esc(c.label)}</div>${historySvg(c.history)}`)
     .join('')
   const chat = list.find(c => c.kind === 'chat')
-  const warn = chat && chat.turns === 0 && cli && cli.turns > 0 ? `<div class="hint">No Chat turn recorded in this folder. If you use Copilot Chat here, VS Code does not load <code>~/.copilot/hooks</code> by itself.<button data-msg="chat-hooks">Enable Chat hooks</button></div>` : ''
+  // Every hook call so far comes from the Copilot CLI: the terminal and also the CLI
+  // sessions opened in the VS Code Chat panel (they run the same CLI, hooks included).
+  // So an empty Chat lane is not an error: it is said calmly, and only the local agent
+  // Chat (which loads hooks from chat.hookFilesLocations) would fill it.
+  const warn = !chat && cli ? `<div class="muted">All turns here come from the Copilot CLI, including CLI sessions opened in the VS Code Chat panel. The Chat lane appears only if the local agent Chat runs the hooks too.<button data-msg="chat-hooks">Enable Chat hooks</button></div>` : ''
   return `<h4>By channel</h4>
 <table class="channels"><tr><th></th><th>turns</th><th>struggling</th><th>quality</th><th>main causes</th></tr>${rows}</table>
 ${charts}${warn}`
@@ -577,7 +581,7 @@ function renderHtml(view, now = Date.now()) {
     .map((x, i) => `<li>${i === 0 ? '<b>' : ''}${esc(x.kind ?? x.source)} / ${esc(x.id)}${i === 0 ? '</b> (latest)' : ''} <span class="muted">${esc(ageText(x.last, now))}</span></li>`)
     .join('')
   const lanes = (view.lanes ?? []).length
-    ? `<h4>Chat and CLI</h4><div class="lanes">${view.lanes
+    ? `<h4>${view.lanes.length > 1 ? 'Chat and CLI' : 'Lanes'}</h4><div class="lanes">${view.lanes
         .map(l => `<div class="lane" style="--l:${LEVEL_HEX[l.level]}"><b>${esc(l.label)}</b> <span class="muted">${esc(LEVEL_LABEL[l.level])}</span><div class="mini">${Array.from({ length: view.segments }, (_, i) => `<span class="${i < Math.min(l.streak, view.segments) ? 'on' : ''}"></span>`).join('')}</div><span class="muted">${l.streak}/${view.threshold} in a row${l.struggling ? ' \u00b7 turn struggling' : ''}<br>last hook ${esc(ageText(l.last, now))}</span></div>`)
         .join('')}</div>`
     : ''

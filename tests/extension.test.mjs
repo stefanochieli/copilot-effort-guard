@@ -333,12 +333,13 @@ test('byChannel splits the log into Chat, CLI and turns from before the split', 
   assert.equal(lib.computeView({ streak: 0, turn: {}, log }).channels.length, 3)
 })
 
-test('the panel shows a channel table, and says so when Chat has no turns at all', () => {
+test('the panel shows a channel table, and says calmly that all turns are CLI when Chat has none', () => {
   const only = lib.renderHtml(lib.computeView({ streak: 0, turn: {}, log: [{ ts: '2026-11-16T10:00:00Z', struggled: false, kind: 'cli' }] }))
   assert.match(only, /By channel/)
-  assert.match(only, /No Chat turn recorded/)
+  assert.match(only, /come from the Copilot CLI/)
+  assert.doesNotMatch(only, /<th>Chat<\/th>/)
   const both = lib.renderHtml(lib.computeView({ streak: 0, turn: {}, log: [{ ts: '2026-11-16T10:00:00Z', struggled: false, kind: 'cli' }, { ts: '2026-11-16T10:01:00Z', struggled: true, kind: 'chat', reason: 'tool_error' }] }))
-  assert.doesNotMatch(both, /No Chat turn recorded/)
+  assert.doesNotMatch(both, /come from the Copilot CLI/)
 })
 
 test('payload capture: the flag file switches the hooks, the summary command runs the hook script', async () => {

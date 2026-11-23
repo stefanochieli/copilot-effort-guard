@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.15.0] — 2026-11-23
+
+### Novità
+
+- support Copilot cloud agent; calm note for an empty Chat lane (#84)
+
 ## [0.14.1] — 2026-11-20
 
 ### Correzioni
