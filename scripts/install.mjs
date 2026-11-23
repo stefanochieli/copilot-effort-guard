@@ -66,6 +66,9 @@ const config = {
     postToolUse: hook('tool'),
     postToolUseFailure: hook('failure'),
     errorOccurred: hook('failure'),
+    // Copilot cloud agent reads only the repository's .github/hooks (and only `bash`):
+    // these two print a one-line report in its session log, and do nothing elsewhere.
+    ...(user ? {} : { agentStop: hook('stop'), sessionEnd: hook('end') }),
   },
 }
 writeFileSync(join(hooksDir, 'effort-guard.json'), JSON.stringify(config, null, 2) + '\n')

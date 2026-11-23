@@ -752,3 +752,54 @@ test('a session first seen as Chat keeps its prompts in the Chat lane (hook end 
   assert.equal(state.lane, 'chat')
   assert.deepEqual(Object.keys(state.lanes), ['chat'])
 })
+
+import { isCloud, cloudWarning, cloudReport } from '../src/effort-guard.mjs'
+
+test('cloud agent: recognised from its sandbox variables, its own source', () => {
+  assert.equal(isCloud({ COPILOT_AGENT_PROMPT: 'fix the build' }), true)
+  assert.equal(isCloud({ GITHUB_COPILOT_API_TOKEN: 'x' }), true)
+  assert.equal(isCloud({ TERM_PROGRAM: 'vscode' }), false)
+  assert.equal(sessionSource({ sessionId: 's', toolName: 'bash' }, { COPILOT_AGENT_PROMPT: 'x' }), 'cloud')
+  assert.equal(laneOf('cloud'), 'cli')
+})
+
+test('cloud agent: red runs in a row inside one turn give advice at the threshold and twice it', () => {
+  const red = { toolName: 'bash', toolArgs: { command: 'npm test' }, toolResult: { resultType: 'success', textResultForLlm: '2 failing' } }
+  const green = { toolName: 'bash', toolArgs: { command: 'npm test' }, toolResult: { resultType: 'success', textResultForLlm: '10 passing' } }
+  let state = emptyState()
+  const advice = []
+  for (const p of [red, red, red, green, red, red, red, red, red, red]) {
+    const r = run('tool', p, state, 3, new Date(), 8, 'cli', { cloud: true })
+    state = r.state
+    if (r.stdout) advice.push(`${state.turn.reds}:${r.progress.type}`)
+  }
+  assert.deepEqual(advice, ['3:progress', '3:progress', '6:progress'])
+  assert.deepEqual([state.turn.runs, state.turn.redRuns, state.turn.maxReds], [10, 9, 6])
+  // Outside the cloud the same runs give no advice inside the turn.
+  let local = emptyState()
+  for (const p of [red, red, red]) local = run('tool', p, local, 3).state
+  assert.equal(run('tool', red, local, 3).stdout, null)
+  assert.equal(cloudWarning({ turn: { reds: 3 } }, { turn: { reds: 3 } }, 3), null, 'once per run, not again on a non-test tool')
+})
+
+test('cloud agent: agentStop / sessionEnd print a progress line with the job report', () => {
+  const state = { ...emptyState(), turn: { struggled: true, reason: 'test_failure_pattern', runs: 4, redRuns: 3, maxReds: 3, tests: 'red', files: ['a.js', 'b.js'] } }
+  assert.equal(cloudReport(state), 'effort-guard (cloud): 4 test/build runs, 3 red, longest red streak 3, last red; 2 files edited; struggling (test_failure_pattern).')
+  assert.match(cloudReport(emptyState()), /no test\/build run; 0 files edited; no open struggle/)
+  assert.equal(run('stop', {}, state, 3, new Date(), 8, 'cli', { cloud: false }).progress, null)
+
+  const dir = mkdtempSync(join(tmpdir(), 'eg-cloud-'))
+  const env = { ...process.env, EFFORT_GUARD_DIR: dir, EFFORT_GUARD_THRESHOLD: '2', COPILOT_AGENT_PROMPT: 'fix it' }
+  const call = (payload, arg) => execFileSync('node', ['src/effort-guard.mjs', arg], { input: JSON.stringify(payload), env, encoding: 'utf8' })
+  const red = { sessionId: 's1', timestamp: 1, toolName: 'bash', toolArgs: { command: 'npm test' }, toolResult: { resultType: 'success', textResultForLlm: '1 failing' } }
+  call({ sessionId: 's1', timestamp: 0, prompt: 'fix it' }, 'prompt')
+  assert.equal(call(red, 'tool'), '')
+  const [progress, output] = call(red, 'tool').trim().split('\n').map(l => JSON.parse(l))
+  assert.equal(progress.type, 'progress')
+  assert.match(output.additionalContext, /2 test\/build runs in a row failed/)
+  const report = JSON.parse(call({ sessionId: 's1', timestamp: 2 }, 'stop').trim())
+  assert.match(report.message, /^effort-guard \(cloud\): 2 test\/build runs, 2 red/)
+  // Without the sandbox variables agentStop is a no-op.
+  const quiet = execFileSync('node', ['src/effort-guard.mjs', 'stop'], { input: '{}', env: { ...process.env, EFFORT_GUARD_DIR: dir, COPILOT_AGENT_PROMPT: '', GITHUB_COPILOT_API_TOKEN: '' }, encoding: 'utf8' })
+  assert.equal(quiet, '')
+})
