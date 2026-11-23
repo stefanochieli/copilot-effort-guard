@@ -4,6 +4,8 @@
 //   node scripts/install.mjs --user       -> ~/.copilot/effort-guard/ + ~/.copilot/hooks/effort-guard.json (personal, Copilot CLI and VS Code)
 //   node scripts/install.mjs --user --uninstall   (or <repo-dir> --uninstall) removes the code and hook file it wrote, keeps the recorded state
 //   --no-gitignore   (repo install) do not add .effort-guard/ to the repo's .gitignore
+//   node scripts/install.mjs <repo-dir> --cloud   -> only <repo-dir>/.github/hooks/effort-guard.json, for Copilot cloud agent:
+//                    no code in the repo, the sandbox downloads this release at run time
 import { mkdirSync, copyFileSync, writeFileSync, readFileSync, appendFileSync, rmSync, rmdirSync, existsSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
@@ -34,6 +36,19 @@ const cmd = event => `node "${entry}" ${event}`
 // import makes every hook fail without a visible error.
 const SRC_FILES = readdirSync(join(root, 'src')).filter(f => f.endsWith('.mjs'))
 const CODE_FILES = [...SRC_FILES, 'package.json']
+
+if (process.argv.includes('--cloud') && !user && !uninstall) {
+  const { cloudHookConfig } = await import('../src/cloud-hooks.mjs')
+  // The repo's package.json, or (inside the VS Code extension's bundle) the extension's.
+  const versionOf = f => { try { return JSON.parse(readFileSync(f, 'utf8')).version } catch { return undefined } }
+  const version = versionOf(join(root, 'package.json')) ?? versionOf(join(root, '..', 'package.json'))
+  const hooksDir = join(resolve(target), '.github', 'hooks')
+  mkdirSync(hooksDir, { recursive: true })
+  writeFileSync(join(hooksDir, 'effort-guard.json'), JSON.stringify(cloudHookConfig(`v${version}`), null, 2) + '\n')
+  console.log(`config: ${join(hooksDir, 'effort-guard.json')} (Copilot cloud agent only, downloads v${version} at run time)`)
+  console.log('Commit it on the default branch (git add -f if .github/hooks is ignored).')
+  process.exit(0)
+}
 
 if (uninstall) {
   // Only what the installer wrote: for --user the state/ folders and events.log live

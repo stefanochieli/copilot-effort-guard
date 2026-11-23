@@ -817,3 +817,21 @@ test('a repository copy steps aside locally when the per-user hooks are installe
   assert.equal(repoCopyShadowed(join(home, 'effort-guard', 'effort-guard.mjs'), { COPILOT_HOME: home }), false, 'the user copy itself')
   assert.equal(repoCopyShadowed(repoCopy, { COPILOT_HOME: home, EFFORT_GUARD_REPO_HOOKS: '1' }), false)
 })
+
+import { cloudCommand, cloudHookConfig } from '../src/cloud-hooks.mjs'
+
+test('cloud-only hook file: bash only, no code in the repo, a no-op outside the sandbox', () => {
+  const cfg = cloudHookConfig('v1.2.3')
+  assert.deepEqual(Object.keys(cfg.hooks), ['userPromptSubmitted', 'postToolUse', 'postToolUseFailure', 'errorOccurred', 'agentStop', 'sessionEnd'])
+  const h = cfg.hooks.postToolUse[0]
+  assert.equal(h.powershell, undefined)
+  assert.equal(h.env.EFFORT_GUARD_DIR, '/tmp/effort-guard-state')
+  assert.match(h.bash, /^\[ -n "\$COPILOT_AGENT_PROMPT\$GITHUB_COPILOT_API_TOKEN" \] \|\| exit 0;/)
+  assert.match(h.bash, /archive\/refs\/tags\/v1\.2\.3\.tar\.gz/)
+  assert.match(h.bash, /effort-guard\.mjs" tool; exit 0$/)
+  assert.throws(() => cloudCommand('main', 'tool'))
+  assert.throws(() => cloudCommand('v1.2.3', 'tool; rm -rf /'))
+  // Outside the cloud sandbox the command exits at once, without downloading anything.
+  const out = execFileSync('bash', ['-c', h.bash], { input: '{}', env: { PATH: process.env.PATH }, encoding: 'utf8' })
+  assert.equal(out, '')
+})
