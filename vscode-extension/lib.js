@@ -356,9 +356,11 @@ function toCsv(projects) {
   return rows.map(r => r.map(csvCell).join(',')).join('\n') + '\n'
 }
 
-// 'vscode-chat' -> Chat, 'cli' / 'cli@vscode' -> CLI.
+// 'vscode-chat' / 'copilot@vscode' (Copilot session of the Chat panel) -> Chat,
+// 'cli' / 'cli@vscode' -> CLI, 'cloud' -> Cloud.
 function sessionKind(source) {
-  return String(source ?? '').startsWith('cli') ? 'CLI' : source === 'vscode-chat' ? 'Chat' : null
+  const s = String(source ?? '')
+  return s.startsWith('cli') ? 'CLI' : s === 'vscode-chat' || s === 'copilot@vscode' ? 'Chat' : s === 'cloud' ? 'Cloud' : null
 }
 
 const LEVEL_LABEL = { idle: 'No data yet', ok: 'All good', calm: 'Very smooth', watch: 'Some struggle', warn: 'Struggling' }
@@ -562,7 +564,7 @@ function channelsHtml(channels) {
   // sessions opened in the VS Code Chat panel (they run the same CLI, hooks included).
   // So an empty Chat lane is not an error: it is said calmly, and only the local agent
   // Chat (which loads hooks from chat.hookFilesLocations) would fill it.
-  const warn = !chat && cli ? `<div class="muted">All turns here come from the Copilot CLI, including CLI sessions opened in the VS Code Chat panel. The Chat lane appears only if the local agent Chat runs the hooks too.<button data-msg="chat-hooks">Enable Chat hooks</button></div>` : ''
+  const warn = !chat && cli ? `<div class="muted">No Chat turn in this folder yet: all turns came from the Copilot CLI. Copilot sessions of the VS Code Chat panel count as Chat once the hooks are updated.<button data-msg="install">Update hooks</button></div>` : ''
   return `<h4>By channel</h4>
 <table class="channels"><tr><th></th><th>turns</th><th>struggling</th><th>quality</th><th>main causes</th></tr>${rows}</table>
 ${charts}${warn}`
