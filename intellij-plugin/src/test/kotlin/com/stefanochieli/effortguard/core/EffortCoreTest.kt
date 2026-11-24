@@ -53,6 +53,7 @@ class EffortCoreTest {
         assertEquals("CLI", calm.kind)
         assertTrue(calm.hint!!.endsWith("(CLI session)"))
         assertEquals("Chat", sessionKind("vscode-chat"))
+        assertEquals("Chat", sessionKind("copilot@vscode"))
         assertEquals(Level.IDLE, EffortCore.computeView(null).level)
     }
 

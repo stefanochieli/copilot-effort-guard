@@ -835,3 +835,13 @@ test('cloud-only hook file: bash only, no code in the repo, a no-op outside the 
   const out = execFileSync('bash', ['-c', h.bash], { input: '{}', env: { PATH: process.env.PATH }, encoding: 'utf8' })
   assert.equal(out, '')
 })
+
+test('a Copilot session of the VS Code Chat panel goes to the Chat lane, the terminal CLI to the CLI lane', () => {
+  const tool = { sessionId: 's', toolName: 'edit', toolArgs: { path: 'a' } }
+  // Shapes of Stefano's 2026-11-24 capture.
+  assert.equal(sessionSource(tool, { COPILOT_CLI: '1', COPILOT_HOME: 'C:\\Users\\x\\.copilot' }), 'copilot@vscode')
+  assert.equal(sessionSource(tool, { COPILOT_CLI: '1', TERM_PROGRAM: 'vscode' }), 'cli@vscode')
+  assert.equal(sessionSource(tool, { COPILOT_CLI: '1', COPILOT_HOME: 'x', WT_SESSION: 'w' }), 'cli', 'a CLI in Windows Terminal stays CLI')
+  assert.equal(sessionSource(tool, { COPILOT_CLI: '1' }), 'cli')
+  assert.equal(laneOf('copilot@vscode'), 'chat')
+})

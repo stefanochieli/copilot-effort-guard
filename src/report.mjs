@@ -113,8 +113,8 @@ export function formatDoctor(info, now = new Date()) {
       ),
     )
     out.push('')
-    out.push('  source: vscode-chat = agent chat, cli = Copilot CLI (cli@vscode = in a VS Code terminal), cloud = Copilot cloud agent.')
-    if (![...groups.values()].some(g => g.source === 'vscode-chat')) {
+    out.push('  source: copilot@vscode = Copilot session of the VS Code Chat panel, vscode-chat = local agent chat, cli = Copilot CLI (cli@vscode = in a VS Code terminal), cloud = Copilot cloud agent.')
+    if (![...groups.values()].some(g => g.source === 'vscode-chat' || g.source === 'copilot@vscode')) {
       out.push('  No VS Code Chat call seen: Chat may not load ~/.copilot/hooks. Install in the project (node scripts/install.mjs <repo-dir>, writes .github/hooks/effort-guard.json) or add the hooks folder to chat.hookFilesLocations, then check Output > "GitHub Copilot Chat Hooks".')
     }
     out.push('  session "t-..." is the terminal tab id and "-" means the payload had no id: sessions in the same folder then share one streak.')

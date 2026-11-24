@@ -108,8 +108,16 @@ export function sessionSource(payload, env = process.env) {
   if (chatPayload || extensionHost) {
     return 'vscode-chat'
   }
+  // A Copilot session started from the VS Code Chat panel ("Copilot" harness) runs the
+  // CLI with COPILOT_HOME set and no terminal around it; the CLI typed in a terminal has
+  // TERM_PROGRAM (or WT_SESSION) instead. Seen on the 2026-11-19 and 2026-11-24 captures.
+  if (!inTerminal && env.COPILOT_HOME && env.COPILOT_CLI) return 'copilot@vscode'
   return env.TERM_PROGRAM === 'vscode' ? 'cli@vscode' : 'cli'
 }
+
+// Sources that belong to the Chat lane: the local agent Chat and the Copilot harness
+// sessions of the Chat panel.
+export const CHAT_SOURCES = ['vscode-chat', 'copilot@vscode']
 
 export function readSession(payload, env = process.env) {
   const id = pick(payload, 'session_id', 'sessionId', 'conversation_id', 'conversationId')
@@ -218,7 +226,7 @@ export function newEpisode(view, { last, now = new Date(), gapMinutes = DEFAULT_
 }
 
 export function laneOf(source) {
-  return source === 'vscode-chat' ? 'chat' : 'cli'
+  return CHAT_SOURCES.includes(source) ? 'chat' : 'cli'
 }
 
 function laneFields(state) {
@@ -1003,7 +1011,7 @@ function main() {
     // tool name, so on their own they would look like the CLI and split one conversation
     // over two lanes.
     const known = session.id === '-' ? null : (before.sessions ?? []).find(x => x.id === session.id)
-    if (known?.source === 'vscode-chat') session.source = 'vscode-chat'
+    if (CHAT_SOURCES.includes(known?.source) && !CHAT_SOURCES.includes(session.source)) session.source = known.source
     const lane = laneOf(session.source)
     const now = new Date()
     // The pause is measured on prompts only: a long build inside a turn is not a pause.
