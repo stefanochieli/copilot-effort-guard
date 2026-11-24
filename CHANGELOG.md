@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.17.0] — 2026-11-24
+
+### Novità
+
+- Copilot sessions of the VS Code Chat panel count in the Chat lane (#88)
+
 ## [0.16.0] — 2026-11-23
 
 ### Novità
