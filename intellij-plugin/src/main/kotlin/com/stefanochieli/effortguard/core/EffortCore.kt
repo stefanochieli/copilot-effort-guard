@@ -34,11 +34,11 @@ data class SessionInfo(val source: String?, val id: String?, val last: String?) 
     val kind: String? get() = sessionKind(source)
 }
 
-/** 'vscode-chat' -> Chat, 'cli' and 'cli@vscode' -> CLI. */
+/** 'vscode-chat' and 'copilot@vscode' (Copilot session of the VS Code Chat panel) -> Chat, 'cli' and 'cli@vscode' -> CLI. */
 fun sessionKind(source: String?): String? = when {
     source == null -> null
     source.startsWith("cli") -> "CLI"
-    source == "vscode-chat" -> "Chat"
+    source == "vscode-chat" || source == "copilot@vscode" -> "Chat"
     else -> null
 }
 
