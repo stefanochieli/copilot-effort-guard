@@ -75,8 +75,31 @@ test('the warning from the prompt hook is handed to the first tool event once', 
     if (r.stdout) outputs.push(r.stdout)
   }
   assert.equal(outputs.length, 1)
-  assert.match(outputs[0].hookSpecificOutput.additionalContext, /3 struggling turns/)
+  assert.match(outputs[0].hookSpecificOutput.additionalContext, /3 turns in a row/)
+  assert.match(outputs[0].systemMessage, /3 struggling turns/)
   assert.equal(outputs[0].hookSpecificOutput.hookEventName, 'PostToolUse')
+})
+
+test('the model gets steps it can take, the person gets the effort/model advice', () => {
+  let state = emptyState()
+  const outputs = []
+  for (let i = 0; i < 7; i++) {
+    state = run('prompt', {}, state, 3).state
+    const r = run('tool', failingTest, state, 3)
+    state = r.state
+    if (r.stdout) outputs.push(r.stdout)
+  }
+  assert.equal(outputs.length, 2)
+  const [first, second] = outputs
+  for (const o of outputs) {
+    assert.doesNotMatch(o.additionalContext, /reasoning effort|more powerful model/)
+    assert.equal(o.hookSpecificOutput.additionalContext, o.additionalContext)
+  }
+  assert.match(first.systemMessage, /reasoning effort/)
+  assert.match(first.additionalContext, /re-read the first error.*hypothesis/)
+  assert.match(second.systemMessage, /more powerful model/)
+  assert.match(second.additionalContext, /stop editing.*ask how to proceed/)
+  assert.doesNotMatch(second.additionalContext, /pull request/)
 })
 
 test('VS Code style payload (snake_case, hook_event_name) works end to end through the CLI', () => {
@@ -88,7 +111,8 @@ test('VS Code style payload (snake_case, hook_event_name) works end to end throu
   call({ hook_event_name: 'PostToolUse', tool_name: 'run_in_terminal', tool_input: { command: 'mvn test' }, tool_response: 'BUILD FAILURE' })
   call({ hook_event_name: 'UserPromptSubmit' })
   const out = call({ hook_event_name: 'PostToolUse', tool_name: 'run_in_terminal', tool_input: { command: 'ls' }, tool_response: 'ok' })
-  assert.match(JSON.parse(out).hookSpecificOutput.additionalContext, /1 struggling turns/)
+  assert.match(JSON.parse(out).hookSpecificOutput.additionalContext, /1 turn in a row/)
+  assert.match(JSON.parse(out).systemMessage, /1 struggling turns/)
   assert.equal(readFileSync(join(dir, 'payloads.jsonl'), 'utf8').trim().split('\n').length, 4)
 })
 
@@ -844,4 +868,42 @@ test('a Copilot session of the VS Code Chat panel goes to the Chat lane, the ter
   assert.equal(sessionSource(tool, { COPILOT_CLI: '1', COPILOT_HOME: 'x', WT_SESSION: 'w' }), 'cli', 'a CLI in Windows Terminal stays CLI')
   assert.equal(sessionSource(tool, { COPILOT_CLI: '1' }), 'cli')
   assert.equal(laneOf('copilot@vscode'), 'chat')
+})
+
+test('rerun: the advice to the model carries the command that reruns only the failed tests', () => {
+  const mvn = { toolName: 'powershell', toolArgs: { command: 'mvn -q test' }, toolResult: { textResultForLlm: '[ERROR]   FooTest.bar:42 expected: <1> but was: <2>\n[INFO] BUILD FAILURE' } }
+  let state = emptyState()
+  let out = null
+  for (let i = 0; i < 4 && !out; i++) {
+    state = run('prompt', {}, state, 3).state
+    const r = run('tool', mvn, state, 3)
+    state = r.state
+    out = r.stdout
+  }
+  assert.match(out.additionalContext, /To rerun only the failed tests: mvn -q test "-Dtest=FooTest#bar"/)
+  assert.doesNotMatch(out.systemMessage, /rerun/)
+  assert.equal(state.pendingRerun, null)
+})
+
+test('rerun: a green run clears it, a token in the command is redacted', () => {
+  const red = { toolName: 'bash', toolArgs: { command: 'GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789 npx jest' }, toolResult: { textResultForLlm: 'FAIL src/a.spec.ts\nTests: 1 failed' } }
+  let state = run('prompt', {}, emptyState(), 3).state
+  state = run('tool', red, state, 3).state
+  assert.ok(state.turn.rerun?.includes('src/a.spec.ts'))
+  assert.doesNotMatch(JSON.stringify(state), /ghp_abcdefghijklmnop/)
+  const green = { toolName: 'bash', toolArgs: { command: 'npx jest' }, toolResult: { textResultForLlm: 'Tests: 3 passed, 3 total' } }
+  state = run('tool', green, state, 3).state
+  assert.equal(state.turn.rerun, null)
+})
+
+test('rerun: the cloud advice inside the job carries it too', () => {
+  const red = { toolName: 'bash', toolArgs: { command: 'pytest -q' }, toolResult: { textResultForLlm: 'FAILED tests/test_a.py::test_x - AssertionError\n1 failed' } }
+  let state = run('prompt', {}, emptyState(), 3, new Date(), 8, 'cli', { cloud: true }).state
+  let advice = null
+  for (let i = 0; i < 3; i++) {
+    const r = run('tool', red, state, 3, new Date(), 8, 'cli', { cloud: true })
+    state = r.state
+    advice = r.stdout?.additionalContext ?? advice
+  }
+  assert.match(advice, /re-read the first error.*To rerun only the failed tests: pytest tests\/test_a.py::test_x$/)
 })
