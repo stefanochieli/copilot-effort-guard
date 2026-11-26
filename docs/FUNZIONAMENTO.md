@@ -29,7 +29,7 @@ Un turno senza fallimenti azzera la serie.
 Quando la serie raggiunge la soglia (default 3), una sola volta per serie:
 
 1. l'hook del prompt salva l'avviso come "in sospeso" e lo scrive su stderr;
-2. al primo evento di tool successivo viene emesso in JSON: `systemMessage` per l'utente e `hookSpecificOutput.additionalContext` per l'agente, perché VS Code non accetta contesto dall'hook del prompt.
+2. al primo evento di tool successivo viene emesso in JSON: `systemMessage` per l'utente e `hookSpecificOutput.additionalContext` per l'agente, con due testi diversi (alla persona effort e modello, all'agente passi che può fare da sé: rileggere il primo errore, cambiare approccio, al doppio della soglia fermarsi e chiedere), perché VS Code non accetta contesto dall'hook del prompt.
 
 Il testo suggerisce di cambiare modello o aumentare l'effort; il cambio lo fai tu.
 

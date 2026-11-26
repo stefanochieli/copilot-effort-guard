@@ -677,12 +677,26 @@ function debugDump(event, payload, input = {}) {
 
 // Output understood by VS Code agent hooks (common output format plus
 // hookSpecificOutput) and tolerated by the CLI, which ignores unknown keys.
-export function warningOutput(warning, hookEventName) {
+// Two readers: `systemMessage` is for the person (who can change model or effort),
+// `additionalContext` for the model, which can only change how it works.
+export function warningOutput(warning, hookEventName, advice = warning) {
   return {
     systemMessage: warning,
-    additionalContext: warning,
-    hookSpecificOutput: { hookEventName, additionalContext: warning },
+    additionalContext: advice,
+    hookSpecificOutput: { hookEventName, additionalContext: advice },
   }
+}
+
+// What the model is told when the work keeps failing: only steps it can take itself.
+// Level 1 at the threshold, level 2 at twice the threshold. `cloud`: nobody answers a
+// question in a cloud job, so the summary goes to the pull request instead.
+export function modelAdvice(level, { what, cloud = false } = {}) {
+  if (level === 1) {
+    return `effort-guard: ${what} Step back before the next attempt: re-read the first error, write down a hypothesis and change approach instead of retrying the same fix.`
+  }
+  return cloud
+    ? `effort-guard: ${what} The approach is not converging: stop editing, describe in the pull request what you tried and what still fails, and leave the decision to the reviewer.`
+    : `effort-guard: ${what} The approach is not converging: stop editing, summarise for the user what you tried and what still fails, and ask how to proceed.`
 }
 
 // Identifies one prompt: the same prompt reaching two registered hooks has the same
@@ -707,12 +721,9 @@ export function promptKey(payload) {
 export function cloudWarning(before, after, threshold) {
   const reds = after.turn?.reds ?? 0
   if (reds <= (before.turn?.reds ?? 0)) return null
-  if (reds === threshold) {
-    return `effort-guard: ${reds} test/build runs in a row failed in this job. Step back before the next attempt: re-read the first error, write down a hypothesis and change approach instead of retrying the same fix.`
-  }
-  if (reds === threshold * 2) {
-    return `effort-guard: ${reds} test/build runs in a row failed in this job. The approach is not converging: stop editing, describe in the pull request what you tried and what still fails, and leave the decision to the reviewer.`
-  }
+  const what = `${reds} test/build runs in a row failed in this job.`
+  if (reds === threshold) return modelAdvice(1, { what, cloud: true })
+  if (reds === threshold * 2) return modelAdvice(2, { what, cloud: true })
   return null
 }
 
@@ -772,7 +783,11 @@ export function run(event, payload, state, threshold, now = new Date(), calmThre
       const warning = next.pendingWarning
       next = { ...next, pendingWarning: null }
       const name = pick(payload, 'hook_event_name', 'hookEventName') ?? (event === 'failure' ? 'PostToolUseFailure' : 'PostToolUse')
-      return { state: next, stderr: warning, stdout: warningOutput(warning, name), delivered: true }
+      // The warning asks the person for more effort or a stronger model; the model gets
+      // the steps it can take itself, by how long the streak is.
+      const what = `${next.streak} turn${next.streak === 1 ? '' : 's'} in a row ended with failing commands or tests.`
+      const advice = modelAdvice(next.streak >= threshold * 2 ? 2 : 1, { what })
+      return { state: next, stderr: warning, stdout: warningOutput(warning, name, advice), delivered: true }
     }
     const advice = cloud ? cloudWarning(state, next, threshold) : null
     if (advice) {

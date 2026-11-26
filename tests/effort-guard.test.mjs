@@ -75,8 +75,31 @@ test('the warning from the prompt hook is handed to the first tool event once', 
     if (r.stdout) outputs.push(r.stdout)
   }
   assert.equal(outputs.length, 1)
-  assert.match(outputs[0].hookSpecificOutput.additionalContext, /3 struggling turns/)
+  assert.match(outputs[0].hookSpecificOutput.additionalContext, /3 turns in a row/)
+  assert.match(outputs[0].systemMessage, /3 struggling turns/)
   assert.equal(outputs[0].hookSpecificOutput.hookEventName, 'PostToolUse')
+})
+
+test('the model gets steps it can take, the person gets the effort/model advice', () => {
+  let state = emptyState()
+  const outputs = []
+  for (let i = 0; i < 7; i++) {
+    state = run('prompt', {}, state, 3).state
+    const r = run('tool', failingTest, state, 3)
+    state = r.state
+    if (r.stdout) outputs.push(r.stdout)
+  }
+  assert.equal(outputs.length, 2)
+  const [first, second] = outputs
+  for (const o of outputs) {
+    assert.doesNotMatch(o.additionalContext, /reasoning effort|more powerful model/)
+    assert.equal(o.hookSpecificOutput.additionalContext, o.additionalContext)
+  }
+  assert.match(first.systemMessage, /reasoning effort/)
+  assert.match(first.additionalContext, /re-read the first error.*hypothesis/)
+  assert.match(second.systemMessage, /more powerful model/)
+  assert.match(second.additionalContext, /stop editing.*ask how to proceed/)
+  assert.doesNotMatch(second.additionalContext, /pull request/)
 })
 
 test('VS Code style payload (snake_case, hook_event_name) works end to end through the CLI', () => {
@@ -88,7 +111,8 @@ test('VS Code style payload (snake_case, hook_event_name) works end to end throu
   call({ hook_event_name: 'PostToolUse', tool_name: 'run_in_terminal', tool_input: { command: 'mvn test' }, tool_response: 'BUILD FAILURE' })
   call({ hook_event_name: 'UserPromptSubmit' })
   const out = call({ hook_event_name: 'PostToolUse', tool_name: 'run_in_terminal', tool_input: { command: 'ls' }, tool_response: 'ok' })
-  assert.match(JSON.parse(out).hookSpecificOutput.additionalContext, /1 struggling turns/)
+  assert.match(JSON.parse(out).hookSpecificOutput.additionalContext, /1 turn in a row/)
+  assert.match(JSON.parse(out).systemMessage, /1 struggling turns/)
   assert.equal(readFileSync(join(dir, 'payloads.jsonl'), 'utf8').trim().split('\n').length, 4)
 })
 
