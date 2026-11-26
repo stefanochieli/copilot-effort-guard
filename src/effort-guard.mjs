@@ -20,11 +20,14 @@ import { errorRules, isBenignError, isMissingCommand, isProbe } from './benign.m
 import { formatDoctor, renderBar } from './report.mjs'
 import { redact, clip } from './redact.mjs'
 import { isEditTool, editedFiles, looksLikeRework, qualitySummary } from './quality.mjs'
+import { suggestRerun } from './rerun.mjs'
 
 const DEFAULT_THRESHOLD = 3
 const DEFAULT_CALM = 8
 const LOG_LIMIT = 500
 const COMMAND_LIMIT = 200
+// The suggested rerun of the failed tests only: redacted and clipped like a command.
+const RERUN_LIMIT = 300
 const PAYLOAD_LOG_BYTES = 5_000_000
 // State and logs hold commands and paths: readable by the user only (no effect on Windows).
 const DIR_MODE = 0o700
@@ -189,9 +192,10 @@ export function resetState(state, now = new Date()) {
     streak: 0,
     calm: 0,
     pendingWarning: null,
+    pendingRerun: null,
     started: true,
     resetAt: now.toISOString(),
-    ...(state.lanes ? { lanes: Object.fromEntries(Object.entries(state.lanes).map(([k, v]) => [k, { ...v, turn: { struggled: false, reason: null, command: null }, streak: 0, calm: 0, pendingWarning: null, started: true }])) } : {}),
+    ...(state.lanes ? { lanes: Object.fromEntries(Object.entries(state.lanes).map(([k, v]) => [k, { ...v, turn: { struggled: false, reason: null, command: null }, streak: 0, calm: 0, pendingWarning: null, pendingRerun: null, started: true }])) } : {}),
   }
 }
 
@@ -209,7 +213,7 @@ export function touchSession(sessions, session, now = new Date(), limit = 5) {
 // says which lane wrote it) and the top-level fields mirror the lane that acted
 // last, so older extensions keep working.
 export const LANES = ['chat', 'cli']
-const LANE_KEYS = ['turn', 'streak', 'calm', 'pendingWarning', 'lastPromptKey', 'recentFiles', 'started', 'sessionId']
+const LANE_KEYS = ['turn', 'streak', 'calm', 'pendingWarning', 'pendingRerun', 'lastPromptKey', 'recentFiles', 'started', 'sessionId']
 
 // A new episode starts after a pause (no hook of this lane for gapMinutes) or, when
 // asked for, when another session takes over the lane: the streak starts from zero,
@@ -222,7 +226,7 @@ export function newEpisode(view, { last, now = new Date(), gapMinutes = DEFAULT_
   const bySession = resetOnSession && sessionId && sessionId !== '-' && view.sessionId && view.sessionId !== sessionId
   const next = sessionId && sessionId !== '-' ? { ...view, sessionId } : view
   if (!byGap && !bySession) return next
-  return { ...next, streak: 0, pendingWarning: null, episode: byGap ? 'gap' : 'session' }
+  return { ...next, streak: 0, pendingWarning: null, pendingRerun: null, episode: byGap ? 'gap' : 'session' }
 }
 
 export function laneOf(source) {
@@ -295,9 +299,13 @@ export function onTool(state, payload, { failed: failedEvent = false, rules = er
     // struggle is measured on red runs in a row inside the turn (see cloudWarning).
     const reds = quality.tests === 'red' ? (state.turn.reds ?? 0) + 1 : 0
     Object.assign(quality, { runs: (state.turn.runs ?? 0) + 1, redRuns: (state.turn.redRuns ?? 0) + (reds ? 1 : 0), reds, maxReds: Math.max(state.turn.maxReds ?? 0, reds) })
+    // The command that reruns only the failed tests, when the output names them.
+    // Redacted: it is built from the command line, which can hold a token.
+    const rerun = reds ? suggestRerun(command, text, { shell: tool }) : null
+    quality.rerun = rerun ? clip(redact(rerun), RERUN_LIMIT) : null
   }
   const counters = Object.fromEntries(['runs', 'redRuns', 'reds', 'maxReds'].filter(k => state.turn[k] !== undefined).map(k => [k, state.turn[k]]))
-  const keep = { files: state.turn.files, tests: state.turn.tests, ...counters, ...(missing || state.turn.missing ? { missing: true } : {}), ...quality }
+  const keep = { files: state.turn.files, tests: state.turn.tests, ...(state.turn.rerun ? { rerun: state.turn.rerun } : {}), ...counters, ...(missing || state.turn.missing ? { missing: true } : {}), ...quality }
 
   if (!reason) {
     // Red then green in the same turn (TDD, or a fix that worked) is not a struggle.
@@ -372,6 +380,8 @@ export function closeTurn(state, threshold, now = new Date(), calmThreshold = DE
       calm,
       log: [...state.log, entry].slice(-LOG_LIMIT),
       pendingWarning: warning,
+      // Handed to the model with the warning: the last red run's narrower command.
+      pendingRerun: warning ? (state.turn.rerun ?? null) : null,
       recentFiles,
     },
     warning,
@@ -699,6 +709,11 @@ export function modelAdvice(level, { what, cloud = false } = {}) {
     : `effort-guard: ${what} The approach is not converging: stop editing, summarise for the user what you tried and what still fails, and ask how to proceed.`
 }
 
+// Appended to the advice when the last red run named its failed tests.
+export function withRerun(advice, rerun) {
+  return rerun ? `${advice} To rerun only the failed tests: ${rerun}` : advice
+}
+
 // Identifies one prompt: the same prompt reaching two registered hooks has the same
 // session and timestamp. Without both there is no safe way to tell, so no key.
 // Name of the agent (custom agent, subagent) when the host sends one. Not confirmed
@@ -781,15 +796,17 @@ export function run(event, payload, state, threshold, now = new Date(), calmThre
     // the prompt hook produced is handed over on the first tool event instead.
     if (next.pendingWarning) {
       const warning = next.pendingWarning
-      next = { ...next, pendingWarning: null }
+      const rerun = next.pendingRerun
+      next = { ...next, pendingWarning: null, pendingRerun: null }
       const name = pick(payload, 'hook_event_name', 'hookEventName') ?? (event === 'failure' ? 'PostToolUseFailure' : 'PostToolUse')
       // The warning asks the person for more effort or a stronger model; the model gets
       // the steps it can take itself, by how long the streak is.
       const what = `${next.streak} turn${next.streak === 1 ? '' : 's'} in a row ended with failing commands or tests.`
-      const advice = modelAdvice(next.streak >= threshold * 2 ? 2 : 1, { what })
+      const advice = withRerun(modelAdvice(next.streak >= threshold * 2 ? 2 : 1, { what }), rerun)
       return { state: next, stderr: warning, stdout: warningOutput(warning, name, advice), delivered: true }
     }
-    const advice = cloud ? cloudWarning(state, next, threshold) : null
+    const cloudAdvice = cloud ? cloudWarning(state, next, threshold) : null
+    const advice = cloudAdvice && withRerun(cloudAdvice, next.turn?.rerun)
     if (advice) {
       const name = pick(payload, 'hook_event_name', 'hookEventName') ?? (event === 'failure' ? 'PostToolUseFailure' : 'PostToolUse')
       return { state: next, stderr: advice, stdout: warningOutput(advice, name), progress: progressLine(advice) }

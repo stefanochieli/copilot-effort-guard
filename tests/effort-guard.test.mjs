@@ -869,3 +869,41 @@ test('a Copilot session of the VS Code Chat panel goes to the Chat lane, the ter
   assert.equal(sessionSource(tool, { COPILOT_CLI: '1' }), 'cli')
   assert.equal(laneOf('copilot@vscode'), 'chat')
 })
+
+test('rerun: the advice to the model carries the command that reruns only the failed tests', () => {
+  const mvn = { toolName: 'powershell', toolArgs: { command: 'mvn -q test' }, toolResult: { textResultForLlm: '[ERROR]   FooTest.bar:42 expected: <1> but was: <2>\n[INFO] BUILD FAILURE' } }
+  let state = emptyState()
+  let out = null
+  for (let i = 0; i < 4 && !out; i++) {
+    state = run('prompt', {}, state, 3).state
+    const r = run('tool', mvn, state, 3)
+    state = r.state
+    out = r.stdout
+  }
+  assert.match(out.additionalContext, /To rerun only the failed tests: mvn -q test "-Dtest=FooTest#bar"/)
+  assert.doesNotMatch(out.systemMessage, /rerun/)
+  assert.equal(state.pendingRerun, null)
+})
+
+test('rerun: a green run clears it, a token in the command is redacted', () => {
+  const red = { toolName: 'bash', toolArgs: { command: 'GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789 npx jest' }, toolResult: { textResultForLlm: 'FAIL src/a.spec.ts\nTests: 1 failed' } }
+  let state = run('prompt', {}, emptyState(), 3).state
+  state = run('tool', red, state, 3).state
+  assert.ok(state.turn.rerun?.includes('src/a.spec.ts'))
+  assert.doesNotMatch(JSON.stringify(state), /ghp_abcdefghijklmnop/)
+  const green = { toolName: 'bash', toolArgs: { command: 'npx jest' }, toolResult: { textResultForLlm: 'Tests: 3 passed, 3 total' } }
+  state = run('tool', green, state, 3).state
+  assert.equal(state.turn.rerun, null)
+})
+
+test('rerun: the cloud advice inside the job carries it too', () => {
+  const red = { toolName: 'bash', toolArgs: { command: 'pytest -q' }, toolResult: { textResultForLlm: 'FAILED tests/test_a.py::test_x - AssertionError\n1 failed' } }
+  let state = run('prompt', {}, emptyState(), 3, new Date(), 8, 'cli', { cloud: true }).state
+  let advice = null
+  for (let i = 0; i < 3; i++) {
+    const r = run('tool', red, state, 3, new Date(), 8, 'cli', { cloud: true })
+    state = r.state
+    advice = r.stdout?.additionalContext ?? advice
+  }
+  assert.match(advice, /re-read the first error.*To rerun only the failed tests: pytest tests\/test_a.py::test_x$/)
+})

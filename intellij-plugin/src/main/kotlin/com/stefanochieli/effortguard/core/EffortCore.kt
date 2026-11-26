@@ -251,6 +251,7 @@ object EffortCore {
         next["streak"] = 0
         next["calm"] = 0
         next["pendingWarning"] = null
+        next["pendingRerun"] = null
         next["started"] = true
         next["resetAt"] = now.toString()
         val lanes = raw["lanes"] as? Map<*, *>
@@ -262,6 +263,7 @@ object EffortCore {
                 lane["streak"] = 0
                 lane["calm"] = 0
                 lane["pendingWarning"] = null
+                lane["pendingRerun"] = null
                 lane["started"] = true
                 k.toString() to lane
             }
